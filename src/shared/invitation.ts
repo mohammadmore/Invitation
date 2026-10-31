@@ -48,7 +48,15 @@ export interface InvitationConfig {
     mapButton: string;
     shareButton: string;
     shareText: string;
+    /** Line shown above the letter on personal links (?to=Name); {guest} is replaced by the name */
+    guestGreeting: string;
   };
+  /** Company contact details shown to guests (+ "save contact" vCard) */
+  contact: ContactInfo;
+  /** Optional English version of all texts (guests can switch language) */
+  en: EnglishTexts;
+  /** Attendance confirmation form */
+  rsvp: { enabled: boolean; askPhone: boolean; askCompany: boolean; note: string };
   theme: {
     primary: string;
     accent: string;
@@ -74,6 +82,38 @@ export interface InvitationConfig {
   /** Items the admin chose not to show at all (e.g. booth not decided yet). */
   hidden: Partial<Record<ItemKey, boolean>>;
 }
+
+export interface ContactInfo {
+  phone: string;
+  whatsapp: string;
+  email: string;
+  website: string;
+  instagram: string;
+  telegram: string;
+}
+
+export interface EnglishTexts {
+  enabled: boolean;
+  companyName: string;
+  tagline: string;
+  badge: string;
+  title: string;
+  welcomeText: string;
+  letter: string;
+  location: string;
+  booth: string;
+  /** Optional overrides; generated from the dates/hours when empty */
+  dateLabel: string;
+  timeLabel: string;
+  enterButton: string;
+  detailsButton: string;
+  mapButton: string;
+  shareButton: string;
+  shareText: string;
+  guestGreeting: string;
+}
+
+export type Lang = 'fa' | 'en';
 
 export const CUSTOM_FONT = '__custom__';
 
@@ -170,7 +210,26 @@ export function blankInvitation(): InvitationConfig {
       mapButton: 'مکان‌یابی دقیق غرفه',
       shareButton: 'اشتراک‌گذاری',
       shareText: '',
+      guestGreeting: '{guest} گرامی',
     },
+    contact: { phone: '', whatsapp: '', email: '', website: '', instagram: '', telegram: '' },
+    en: {
+      enabled: false,
+      companyName: '',
+      tagline: '',
+      badge: '',
+      title: '',
+      welcomeText: '',
+      letter: '',
+      location: '',
+      booth: '',
+      dateLabel: '',
+      timeLabel: '',
+      ...EN_DEFAULT_BUTTONS,
+      shareText: '',
+      guestGreeting: 'Dear {guest},',
+    },
+    rsvp: { enabled: false, askPhone: true, askCompany: true, note: 'اطلاعات شما فقط برای هماهنگی دیدار در غرفه استفاده می‌شود.' },
     theme: { primary: '#1E3A8A', accent: '#0EA5E9', background: '#0f172a', font: 'Vazirmatn', customFontUrl: '' },
     media: { video: '', videoPoster: '', videoOpacity: 75, music: '', musicVolume: 50 },
     footer: { ...DEFAULT_FOOTER },
@@ -178,7 +237,21 @@ export function blankInvitation(): InvitationConfig {
   };
 }
 
+export const EN_DEFAULT_BUTTONS = {
+  enterButton: 'Open invitation',
+  detailsButton: 'Date & venue',
+  mapButton: 'Find our booth',
+  shareButton: 'Share',
+};
+
 /** Optional ready-made wording the admin can insert with one click (generic, no names). */
+export const SUGGESTIONS_EN = {
+  badge: 'Official Invitation',
+  welcomeText: 'We would be honoured to host you at this major event',
+  letter:
+    'Dear guest,\nWe are delighted to invite you to visit the {company} booth at {event}.\n\nThis meeting is an opportunity for a fresh conversation, to get to know our products and achievements, and a step towards valuable future cooperation.',
+};
+
 export const SUGGESTIONS = {
   badge: 'دعوتنامه رسمی',
   welcomeText: 'مفتخریم میزبان شما در این رویداد بزرگ باشیم',
@@ -186,9 +259,126 @@ export const SUGGESTIONS = {
     'با سلام و احترام\nبا افتخار از شما دعوت می‌کنیم تا با حضور ارزشمند خود در {event}، میهمان غرفه {company} باشید.\n\nاین دیدار، فرصتی است برای گفت‌وگویی تازه، آشنایی با محصولات و دستاوردهای ما و گامی برای توسعه همکاری‌های ارزشمند آینده.',
 };
 
-/** Replace {company} / {event} placeholders in user-written text. */
-export function fillPlaceholders(text: string, c: InvitationConfig): string {
-  return text.replaceAll('{company}', c.company.name).replaceAll('{event}', c.event.title);
+/** Replace {company} / {event} / {guest} placeholders in user-written text. */
+export function fillPlaceholders(text: string, c: InvitationConfig, guest = ''): string {
+  return text.replaceAll('{company}', c.company.name).replaceAll('{event}', c.event.title).replaceAll('{guest}', guest);
+}
+
+/** Turn literal names back into placeholders (used when copying an invitation). */
+function toPlaceholders(text: string, company: string, event: string): string {
+  let t = text;
+  if (event.trim().length > 2) t = t.replaceAll(event.trim(), '{event}');
+  if (company.trim().length > 1) t = t.replaceAll(company.trim(), '{company}');
+  return t;
+}
+
+// ---------- contact ----------
+
+const faToLatinDigits = (s: string) => s.replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** International-ish phone for tel:/wa.me links: Iranian 09xx… becomes 989xx… */
+export function normalizePhone(raw: string, forWhatsapp = false): string {
+  let d = faToLatinDigits(raw).replace(/[^\d+]/g, '');
+  if (d.startsWith('+')) d = d.slice(1);
+  if (d.startsWith('00')) d = d.slice(2);
+  if (forWhatsapp && d.startsWith('0')) d = `98${d.slice(1)}`;
+  return d.length >= 5 ? d : '';
+}
+
+export interface ContactLink {
+  kind: keyof ContactInfo;
+  href: string;
+  label: string;
+}
+
+/** Usable contact links (invalid entries are skipped). */
+export function contactLinks(c: ContactInfo): ContactLink[] {
+  const out: ContactLink[] = [];
+  const phone = normalizePhone(c.phone);
+  if (phone) out.push({ kind: 'phone', href: `tel:${c.phone.trim().startsWith('+') ? '+' : ''}${phone}`, label: faToLatinDigits(c.phone.trim()) });
+  const wa = normalizePhone(c.whatsapp, true);
+  if (wa) out.push({ kind: 'whatsapp', href: `https://wa.me/${wa}`, label: 'WhatsApp' });
+  if (EMAIL_RE.test(c.email.trim())) out.push({ kind: 'email', href: `mailto:${c.email.trim()}`, label: c.email.trim() });
+  const web = safeUrl(c.website);
+  if (web) out.push({ kind: 'website', href: web, label: new URL(web).hostname.replace(/^www\./, '') });
+  const ig = c.instagram.trim().replace(/^@/, '');
+  if (ig) {
+    const url = /instagram\.com/i.test(ig) ? safeUrl(ig) : /^[\w.]{1,30}$/.test(ig) ? `https://instagram.com/${ig}` : '';
+    if (url) out.push({ kind: 'instagram', href: url, label: 'Instagram' });
+  }
+  const tg = c.telegram.trim().replace(/^@/, '');
+  if (tg) {
+    const url = /t\.me|telegram\.me/i.test(tg) ? safeUrl(tg) : /^\w{4,32}$/.test(tg) ? `https://t.me/${tg}` : '';
+    if (url) out.push({ kind: 'telegram', href: url, label: 'Telegram' });
+  }
+  return out;
+}
+
+// ---------- English version ----------
+
+/**
+ * The invitation as guests see it in the given language: the English texts replace
+ * the Persian ones (empty when not entered, so they show up as "missing" in previews).
+ */
+export function localize(c: InvitationConfig, lang: Lang): InvitationConfig {
+  if (lang === 'fa' || !c.en.enabled) return c;
+  const e = c.en;
+  return {
+    ...c,
+    company: { ...c.company, name: e.companyName, tagline: e.tagline },
+    event: { ...c.event, badge: e.badge, title: e.title, welcomeText: e.welcomeText, location: e.location, booth: e.booth, dateLabel: e.dateLabel, timeLabel: e.timeLabel },
+    texts: {
+      ...c.texts,
+      letter: e.letter,
+      enterButton: e.enterButton || EN_DEFAULT_BUTTONS.enterButton,
+      detailsButton: e.detailsButton || EN_DEFAULT_BUTTONS.detailsButton,
+      mapButton: e.mapButton || EN_DEFAULT_BUTTONS.mapButton,
+      shareButton: e.shareButton || EN_DEFAULT_BUTTONS.shareButton,
+      shareText: e.shareText,
+      guestGreeting: e.guestGreeting || 'Dear {guest},',
+    },
+  };
+}
+
+// ---------- copying ----------
+
+export type CopyMode = 'newEvent' | 'newOrganizer';
+
+/** Items that describe the exhibition (vs. the organiser's identity). */
+const EVENT_ITEMS: ItemKey[] = ['eventLogo', 'date', 'time', 'location', 'mapUrl', 'booth', 'boothMap', 'calendar'];
+
+/**
+ * newEvent:     same organiser, another exhibition → keep identity/design/texts, clear the exhibition.
+ * newOrganizer: same exhibition, another booth/company → keep the exhibition, clear identity, design and booth.
+ * Literal names in the texts are turned into {company}/{event} placeholders so nothing of the
+ * old invitation leaks into the new one.
+ */
+export function copyInvitation(src: InvitationConfig, mode: CopyMode): InvitationConfig {
+  const blank = blankInvitation();
+  const c = structuredClone(src);
+  const ph = (t: string, company: string, event: string) => toPlaceholders(t, company, event);
+  c.slug = '';
+  c.texts = { ...c.texts, letter: ph(c.texts.letter, src.company.name, src.event.title), shareText: ph(c.texts.shareText, src.company.name, src.event.title) };
+  c.event.welcomeText = ph(c.event.welcomeText, src.company.name, src.event.title);
+  c.en = { ...c.en, letter: ph(c.en.letter, src.en.companyName, src.en.title), shareText: ph(c.en.shareText, src.en.companyName, src.en.title), welcomeText: ph(c.en.welcomeText, src.en.companyName, src.en.title) };
+  const hidden: Partial<Record<ItemKey, boolean>> = {};
+
+  if (mode === 'newEvent') {
+    c.event = { ...blank.event, badge: src.event.badge, welcomeText: c.event.welcomeText, timezone: src.event.timezone };
+    c.en = { ...c.en, title: '', location: '', booth: '', dateLabel: '', timeLabel: '' };
+    for (const [k, v] of Object.entries(src.hidden) as [ItemKey, boolean][]) if (v && !EVENT_ITEMS.includes(k)) hidden[k] = true;
+  } else {
+    c.company = { ...blank.company };
+    c.contact = { ...blank.contact };
+    c.theme = { ...blank.theme };
+    c.media = { ...blank.media };
+    c.event = { ...c.event, booth: '', boothMapUrl: '' };
+    c.en = { ...c.en, companyName: '', tagline: '', booth: '' };
+    for (const [k, v] of Object.entries(src.hidden) as [ItemKey, boolean][]) if (v && EVENT_ITEMS.includes(k) && k !== 'booth' && k !== 'boothMap') hidden[k] = true;
+  }
+  c.hidden = hidden;
+  return c;
 }
 
 // ---------- displayable items: hide flags & completeness ----------
@@ -210,7 +400,8 @@ export type ItemKey =
   | 'calendar'
   | 'share'
   | 'video'
-  | 'music';
+  | 'music'
+  | 'contact';
 
 /** Every item that appears on the invitation, the wizard step that edits it, and its "missing" message. */
 export const ITEMS: Record<ItemKey, { label: string; step: number; missing: string }> = {
@@ -231,6 +422,7 @@ export const ITEMS: Record<ItemKey, { label: string; step: number; missing: stri
   share: { label: 'دکمه اشتراک‌گذاری', step: 3, missing: '' },
   video: { label: 'ویدئوی پس‌زمینه', step: 2, missing: 'ویدئوی پس‌زمینه انتخاب نشده' },
   music: { label: 'موزیک پس‌زمینه', step: 2, missing: 'موزیک انتخاب نشده' },
+  contact: { label: 'اطلاعات تماس شرکت', step: 0, missing: 'اطلاعات تماس شرکت هنوز وارد نشده' },
 };
 export const ITEM_KEYS = Object.keys(ITEMS) as ItemKey[];
 
@@ -274,6 +466,8 @@ export function isFilled(c: InvitationConfig, key: ItemKey): boolean {
       return !!c.media.video;
     case 'music':
       return !!c.media.music;
+    case 'contact':
+      return contactLinks(c.contact).length > 0;
   }
 }
 
@@ -285,7 +479,7 @@ export const isMissing = (c: InvitationConfig, key: ItemKey) => isShown(c, key) 
 // ---------- validation / sanitising (shared by client and server) ----------
 
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
-export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
+export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'en', 'fa', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -384,6 +578,40 @@ export function sanitizeInvitation(input: any): InvitationConfig {
       mapButton: str(i.texts?.mapButton, '', LIMITS.button) || d.texts.mapButton,
       shareButton: str(i.texts?.shareButton, '', LIMITS.button) || d.texts.shareButton,
       shareText: str(i.texts?.shareText, '', LIMITS.shareText),
+      guestGreeting: str(i.texts?.guestGreeting, d.texts.guestGreeting, LIMITS.short),
+    },
+    contact: {
+      phone: str(i.contact?.phone, '', 40),
+      whatsapp: str(i.contact?.whatsapp, '', 40),
+      email: str(i.contact?.email, '', LIMITS.short),
+      website: str(i.contact?.website, '', LIMITS.url),
+      instagram: str(i.contact?.instagram, '', LIMITS.short),
+      telegram: str(i.contact?.telegram, '', LIMITS.short),
+    },
+    en: {
+      enabled: i.en?.enabled === true,
+      companyName: str(i.en?.companyName, '', LIMITS.short),
+      tagline: str(i.en?.tagline, '', LIMITS.short),
+      badge: str(i.en?.badge, '', LIMITS.short),
+      title: str(i.en?.title, '', LIMITS.short),
+      welcomeText: str(i.en?.welcomeText, '', LIMITS.text),
+      letter: str(i.en?.letter, '', LIMITS.letter),
+      location: str(i.en?.location, '', LIMITS.short),
+      booth: str(i.en?.booth, '', LIMITS.short),
+      dateLabel: str(i.en?.dateLabel, '', LIMITS.short),
+      timeLabel: str(i.en?.timeLabel, '', LIMITS.short),
+      enterButton: str(i.en?.enterButton, '', LIMITS.button) || EN_DEFAULT_BUTTONS.enterButton,
+      detailsButton: str(i.en?.detailsButton, '', LIMITS.button) || EN_DEFAULT_BUTTONS.detailsButton,
+      mapButton: str(i.en?.mapButton, '', LIMITS.button) || EN_DEFAULT_BUTTONS.mapButton,
+      shareButton: str(i.en?.shareButton, '', LIMITS.button) || EN_DEFAULT_BUTTONS.shareButton,
+      shareText: str(i.en?.shareText, '', LIMITS.shareText),
+      guestGreeting: str(i.en?.guestGreeting, d.en.guestGreeting, LIMITS.short),
+    },
+    rsvp: {
+      enabled: i.rsvp?.enabled === true,
+      askPhone: i.rsvp?.askPhone !== false,
+      askCompany: i.rsvp?.askCompany !== false,
+      note: str(i.rsvp?.note, d.rsvp.note, LIMITS.text),
     },
     theme: {
       primary: color(i.theme?.primary, d.theme.primary),
@@ -418,7 +646,34 @@ export function publicVersion(c: InvitationConfig): InvitationConfig {
   };
 }
 
-export type IssueField = 'slug' | 'company.name' | 'event.title' | 'event.dates' | 'event.time' | 'event.mapUrl' | 'event.boothMapUrl' | 'footer.url' | 'theme.font' | `item.${ItemKey}`;
+export type IssueField =
+  | 'slug'
+  | 'company.name'
+  | 'event.title'
+  | 'event.dates'
+  | 'event.time'
+  | 'event.mapUrl'
+  | 'event.boothMapUrl'
+  | 'footer.url'
+  | 'theme.font'
+  | 'contact.email'
+  | `item.${ItemKey}`
+  | `en.${string}`;
+
+/** Wizard step numbers (shared so validation can point at the right step). */
+export const STEP = { basics: 0, brand: 1, media: 2, texts: 3, event: 4, english: 5, guests: 6, publish: 7 } as const;
+
+/** English fields that must be filled (when the item is shown) if the English version is on. */
+const EN_REQUIRED: { key: ItemKey | 'companyName' | 'title'; field: keyof EnglishTexts; label: string }[] = [
+  { key: 'companyName', field: 'companyName', label: 'نام شرکت' },
+  { key: 'title', field: 'title', label: 'نام نمایشگاه' },
+  { key: 'badge', field: 'badge', label: 'عنوان بالای نام نمایشگاه' },
+  { key: 'welcomeText', field: 'welcomeText', label: 'جمله خوش‌آمد' },
+  { key: 'letter', field: 'letter', label: 'متن دعوتنامه' },
+  { key: 'tagline', field: 'tagline', label: 'شعار شرکت' },
+  { key: 'location', field: 'location', label: 'محل برگزاری' },
+  { key: 'booth', field: 'booth', label: 'شماره غرفه' },
+];
 
 export interface Issue {
   field: IssueField;
@@ -455,5 +710,13 @@ export function validateForPublish(c: InvitationConfig): Issue[] {
   if (isShown(c, 'boothMap') && c.event.boothMapUrl && !safeUrl(c.event.boothMapUrl)) add('event.boothMapUrl', 4, 'لینک نقشه غرفه معتبر نیست.');
   if (c.footer.show && c.footer.url && !safeUrl(c.footer.url)) add('footer.url', 3, 'لینک امضای پایین صفحه معتبر نیست.');
   if (c.theme.font === CUSTOM_FONT && !c.theme.customFontUrl) add('theme.font', 1, 'فایل فونت اختصاصی بارگذاری نشده است.');
+  if (isShown(c, 'contact') && c.contact.email.trim() && !EMAIL_RE.test(c.contact.email.trim())) add('contact.email', 0, 'ایمیل شرکت معتبر نیست.');
+
+  if (c.en.enabled) {
+    for (const r of EN_REQUIRED) {
+      const itemShown = r.key === 'companyName' || r.key === 'title' ? true : isShown(c, r.key as ItemKey);
+      if (itemShown && !String(c.en[r.field]).trim()) add(`en.${r.field}`, STEP.english, `نسخه انگلیسی: ${r.label} وارد نشده.`);
+    }
+  }
   return issues;
 }

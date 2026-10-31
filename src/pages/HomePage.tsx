@@ -1,9 +1,21 @@
 import type React from 'react';
-import { useEffect, useState } from 'react';
-import { ExternalLink, Pencil, Plus, Trash2, Sparkles, Lock, KeyRound, LogOut } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ExternalLink, Pencil, Plus, Trash2, Sparkles, Lock, KeyRound, LogOut, CopyPlus, Search, Eye, Users, MessageSquare, CircleCheck } from 'lucide-react';
+import { DuplicateModal } from '../builder/panels';
+import type { CopyMode } from '../shared/invitation';
 import { api, editUrl, forgetMyInvitation, getAdminPassword, getMyInvitations, saveMyInvitation, setAdminPassword, setEditAuth, type MyInvitation, type RecordStatus, type RecordSummary } from '../lib/api';
 import { route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
+
+type Filter = 'all' | 'draft' | 'published' | 'changed' | 'ended' | 'feedback';
+const FILTERS: [Filter, string][] = [
+  ['all', 'همه'],
+  ['draft', 'پیش‌نویس'],
+  ['published', 'منتشرشده'],
+  ['changed', 'تغییرات منتشرنشده'],
+  ['ended', 'تمام‌شده'],
+  ['feedback', 'نظر جدید کارفرما'],
+];
 
 const STATUS: Record<RecordStatus, { label: string; cls: string }> = {
   draft: { label: 'پیش‌نویس', cls: 'bg-slate-500/20 text-slate-300' },
@@ -25,6 +37,9 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [issued, setIssued] = useState<{ name: string; url: string } | null>(null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [copyFrom, setCopyFrom] = useState<{ id: string; token?: string } | null>(null);
 
   useEffect(() => {
     hideSplash();
@@ -99,6 +114,36 @@ export default function HomePage() {
   }
 
   const mineIds = new Set(mine.map(m => m.id));
+
+  async function duplicate(mode: CopyMode) {
+    setEditAuth(copyFrom?.token ? { id: copyFrom.id, token: copyFrom.token } : null);
+    const r = await api.duplicate(copyFrom!.id, mode);
+    setEditAuth(null);
+    saveMyInvitation({ id: r.id, editToken: r.editToken, slug: '', company: r.company, event: r.event, createdAt: new Date().toISOString() });
+    window.location.href = editUrl(r.id, r.editToken);
+  }
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return all.filter(i => {
+      if (q && ![i.company, i.event, i.slug, i.id].some(v => v.toLowerCase().includes(q))) return false;
+      switch (filter) {
+        case 'draft':
+          return i.status === 'draft';
+        case 'published':
+          return i.status !== 'draft' && !i.ended;
+        case 'changed':
+          return i.status === 'changed';
+        case 'ended':
+          return i.ended;
+        case 'feedback':
+          return i.openFeedback > 0;
+        default:
+          return true;
+      }
+    });
+  }, [all, query, filter]);
+  const countOf = (f: Filter) => all.filter(i => (f === 'all' ? true : f === 'draft' ? i.status === 'draft' : f === 'published' ? i.status !== 'draft' && !i.ended : f === 'changed' ? i.status === 'changed' : f === 'ended' ? i.ended : i.openFeedback > 0)).length;
   const label = (company: string, event: string) => [company || 'بدون نام', event].filter(Boolean).join(' — ');
 
   return (
@@ -141,6 +186,9 @@ export default function HomePage() {
                   <a href={editUrl(item.id, item.editToken)} className="p-2 rounded-xl hover:bg-white/10" title="ادامه ویرایش">
                     <Pencil className="w-5 h-5" />
                   </a>
+                  <button onClick={() => setCopyFrom({ id: item.id, token: item.editToken })} className="p-2 rounded-xl hover:bg-white/10" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
+                    <CopyPlus className="w-5 h-5" />
+                  </button>
                   <button onClick={() => remove(item.id, label(item.company, item.event), item.editToken)} className="p-2 rounded-xl hover:bg-red-500/20 text-red-300" title="حذف">
                     <Trash2 className="w-5 h-5" />
                   </button>
@@ -172,15 +220,52 @@ export default function HomePage() {
               </div>
             )}
             {all.length === 0 && <p className="text-slate-400 text-sm">هنوز دعوتنامه‌ای ساخته نشده است.</p>}
+            {all.length > 0 && (
+              <div className="mb-3 space-y-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="جست‌وجو در نام شرکت، نمایشگاه یا آدرس…" className="w-full bg-white/5 border border-white/10 rounded-xl pr-9 pl-3 py-2.5 text-sm outline-none focus:border-sky-400" />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {FILTERS.map(([f, label]) => (
+                    <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-xs font-bold transition ${filter === f ? 'bg-sky-500 text-slate-950' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                      {label} ({countOf(f).toLocaleString('fa-IR')})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {all.length > 0 && filtered.length === 0 && <p className="text-slate-400 text-sm">موردی پیدا نشد.</p>}
             <ul className="space-y-2">
-              {all.map(item => (
+              {filtered.map(item => (
                 <li key={item.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-bold truncate">{label(item.company, item.event)}</p>
                     <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
                       <StatusBadge status={item.status} />
+                      {item.ended && <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-slate-700 text-slate-300">تمام‌شده</span>}
+                      {item.approved && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold rounded-full px-2 py-0.5 bg-emerald-500/20 text-emerald-300">
+                          <CircleCheck className="w-3 h-3" /> تأیید کارفرما
+                        </span>
+                      )}
+                      {item.openFeedback > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold rounded-full px-2 py-0.5 bg-amber-500/20 text-amber-300">
+                          <MessageSquare className="w-3 h-3" /> {item.openFeedback.toLocaleString('fa-IR')} نظر
+                        </span>
+                      )}
                       {item.slug && <span dir="ltr">{route(item.slug)}</span>}
                       <span>{new Date(item.updatedAt).toLocaleDateString('fa-IR')}</span>
+                      {item.views > 0 && (
+                        <span className="inline-flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> {item.views.toLocaleString('fa-IR')}
+                        </span>
+                      )}
+                      {item.rsvps > 0 && (
+                        <span className="inline-flex items-center gap-1">
+                          <Users className="w-3 h-3" /> {item.rsvps.toLocaleString('fa-IR')}
+                        </span>
+                      )}
                     </p>
                   </div>
                   {item.status !== 'draft' && (
@@ -191,6 +276,9 @@ export default function HomePage() {
                   <a href={route(`builder/${item.id}`)} className="p-2 rounded-xl hover:bg-white/10" title="ویرایش">
                     <Pencil className="w-5 h-5" />
                   </a>
+                  <button onClick={() => setCopyFrom({ id: item.id })} className="p-2 rounded-xl hover:bg-white/10" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
+                    <CopyPlus className="w-5 h-5" />
+                  </button>
                   <button onClick={() => resetToken(item)} className="p-2 rounded-xl hover:bg-white/10" title="صدور لینک ویرایش جدید">
                     <KeyRound className="w-5 h-5" />
                   </button>
@@ -214,6 +302,7 @@ export default function HomePage() {
           )
         )}
       </div>
+      <div className="text-slate-900">{copyFrom && <DuplicateModal onClose={() => setCopyFrom(null)} onCopy={duplicate} />}</div>
     </div>
   );
 }

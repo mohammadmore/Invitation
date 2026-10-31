@@ -11,14 +11,17 @@ import {
   RESERVED_SLUGS,
   SLUG_RE,
   SUGGESTIONS,
+  SUGGESTIONS_EN,
   TIMEZONES,
+  contactLinks,
   isMissing,
+  isShown,
   type InvitationConfig,
   type Issue,
   type IssueField,
   type ItemKey,
 } from '../shared/invitation';
-import { jalaliRangeLabel, timeRangeLabel } from '../shared/calendar';
+import { englishDateLabel, englishTimeLabel, jalaliRangeLabel, timeRangeLabel } from '../shared/calendar';
 import { colorWarnings } from '../shared/color';
 import { api } from '../lib/api';
 import { asset, route } from '../lib/paths';
@@ -185,7 +188,56 @@ export function BasicsStep({ config, update, slugLocked, recordId, issues, previ
           </div>
         </Field>
       </Section>
+
+      <ContactSection config={config} update={update} issues={issues} previewAt={previewAt} />
     </>
+  );
+}
+
+function ContactSection({ config, update, issues, previewAt }: Pick<StepProps, 'config' | 'update' | 'issues' | 'previewAt'>) {
+  const c = config.contact;
+  const set = (patch: Partial<InvitationConfig['contact']>) => update('contact', patch);
+  const valid = contactLinks(c).map(l => l.kind);
+  const bad = (k: keyof InvitationConfig['contact']) => !!c[k].trim() && !valid.includes(k);
+  return (
+    <Section title="اطلاعات تماس شرکت" description="به مهمان امکان تماس، پیام در واتس‌اپ و ذخیره شرکت در مخاطبین گوشی را می‌دهد. فقط موارد پرشده نمایش داده می‌شوند." onFocusCapture={() => previewAt(3)}>
+      <Field label="راه‌های تماس" hide={hideProps(config, update, 'contact')} warning={pending(config, 'contact')} error={issueFor(issues, 'contact.email')}>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className="block text-xs font-bold text-slate-500 mb-1">تلفن</span>
+            <TextInput ltr inputMode="tel" value={c.phone} maxLength={40} invalid={bad('phone')} onChange={e => set({ phone: e.target.value })} placeholder="021-12345678" />
+          </label>
+          <label className="block">
+            <span className="flex items-center justify-between text-xs font-bold text-slate-500 mb-1">
+              واتس‌اپ
+              {c.phone && !c.whatsapp && (
+                <button type="button" onClick={() => set({ whatsapp: c.phone })} className="text-[11px] text-sky-600">
+                  همان تلفن
+                </button>
+              )}
+            </span>
+            <TextInput ltr inputMode="tel" value={c.whatsapp} maxLength={40} invalid={bad('whatsapp')} onChange={e => set({ whatsapp: e.target.value })} placeholder="0912…" />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-bold text-slate-500 mb-1">ایمیل</span>
+            <TextInput ltr type="email" value={c.email} maxLength={120} invalid={bad('email')} onChange={e => set({ email: e.target.value })} placeholder="info@company.com" />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-bold text-slate-500 mb-1">وب‌سایت</span>
+            <TextInput ltr value={c.website} maxLength={300} invalid={bad('website')} onChange={e => set({ website: e.target.value })} placeholder="company.com" />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-bold text-slate-500 mb-1">اینستاگرام</span>
+            <TextInput ltr value={c.instagram} maxLength={120} invalid={bad('instagram')} onChange={e => set({ instagram: e.target.value })} placeholder="@company" />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-bold text-slate-500 mb-1">تلگرام</span>
+            <TextInput ltr value={c.telegram} maxLength={120} invalid={bad('telegram')} onChange={e => set({ telegram: e.target.value })} placeholder="@company" />
+          </label>
+        </div>
+        {(['phone', 'whatsapp', 'email', 'website', 'instagram', 'telegram'] as const).some(bad) && <p className="text-xs text-rose-600 mt-1.5">موارد قرمز معتبر نیستند و نمایش داده نمی‌شوند.</p>}
+      </Field>
+    </Section>
   );
 }
 
@@ -198,13 +250,13 @@ export function BrandStep({ config, update, issues, previewAt }: StepProps) {
     <>
       <Section title="لوگوها" description="بهتر است از فایل PNG یا SVG با پس‌زمینه شفاف استفاده کنید. تصاویر بزرگ به‌طور خودکار کوچک و فشرده می‌شوند.">
         <div onFocusCapture={() => previewAt(1)} onPointerDownCapture={() => previewAt(1)}>
-          <ImageUpload label="لوگوی اصلی شرکت (افقی)" hint="در صفحه اول، روی ویدئو نمایش داده می‌شود." value={config.company.logo} onChange={logo => update('company', { logo })} dark maxImageDim={1200} hide={hideProps(config, update, 'logo')} warning={pending(config, 'logo')} />
+          <ImageUpload label="لوگوی اصلی شرکت (افقی)" hint="در صفحه اول، روی ویدئو نمایش داده می‌شود." value={config.company.logo} onChange={logo => update('company', { logo })} dark maxImageDim={1200} trim hide={hideProps(config, update, 'logo')} warning={pending(config, 'logo')} />
         </div>
         <div onFocusCapture={() => previewAt(2)} onPointerDownCapture={() => previewAt(2)}>
-          <ImageUpload label="نشان شرکت (مربعی)" hint="داخل دایره بالای متن دعوتنامه قرار می‌گیرد." value={config.company.icon} onChange={icon => update('company', { icon })} maxImageDim={512} hide={hideProps(config, update, 'icon')} warning={pending(config, 'icon')} />
+          <ImageUpload label="نشان شرکت (مربعی)" hint="داخل دایره بالای متن دعوتنامه قرار می‌گیرد." value={config.company.icon} onChange={icon => update('company', { icon })} maxImageDim={512} trim hide={hideProps(config, update, 'icon')} warning={pending(config, 'icon')} />
         </div>
         <div onFocusCapture={() => previewAt(1)} onPointerDownCapture={() => previewAt(1)}>
-          <ImageUpload label="لوگوی نمایشگاه" hint="زیر نام نمایشگاه در کارت صفحه اول." value={config.event.logo} onChange={logo => update('event', { logo })} maxImageDim={1000} hide={hideProps(config, update, 'eventLogo')} warning={pending(config, 'eventLogo')} />
+          <ImageUpload label="لوگوی نمایشگاه" hint="زیر نام نمایشگاه در کارت صفحه اول." value={config.event.logo} onChange={logo => update('event', { logo })} maxImageDim={1000} trim hide={hideProps(config, update, 'eventLogo')} warning={pending(config, 'eventLogo')} />
         </div>
         <ImageUpload
           label="تصویر پیش‌نمایش لینک (اختیاری)"
@@ -615,6 +667,128 @@ export function EventStep({ config, update, issues, previewAt }: StepProps) {
           warning={pending(config, 'boothMap')}
           forceError={!!issueFor(issues, 'event.boothMapUrl')}
         />
+      </Section>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ 6. English
+
+export function EnglishStep({ config, update, issues }: StepProps) {
+  const e = config.en;
+  const set = (patch: Partial<InvitationConfig['en']>) => update('en', patch);
+  const err = (f: keyof InvitationConfig['en']) => issueFor(issues, `en.${f}` as IssueField);
+  const missing = (f: keyof InvitationConfig['en']) => (e.enabled && !String(e[f]).trim() ? 'هنوز وارد نشده' : undefined);
+  const shown = (k: ItemKey) => isShown(config, k);
+  const ref = (fa: string) => (fa ? <span className="text-slate-400">فارسی: {fa.length > 90 ? `${fa.slice(0, 90)}…` : fa}</span> : undefined);
+  const en = (props: React.InputHTMLAttributes<HTMLInputElement>) => <TextInput dir="ltr" className="text-left" {...props} />;
+
+  return (
+    <>
+      <Section title="نسخه انگلیسی" description="برای مهمانان خارجی؛ دکمه English در بالای دعوتنامه نمایش داده می‌شود و مهمان می‌تواند زبان را عوض کند. پیش‌نمایش در این مرحله انگلیسی است.">
+        <Toggle checked={e.enabled} onChange={enabled => set({ enabled })} label="دعوتنامه نسخه انگلیسی هم داشته باشد" />
+      </Section>
+
+      {e.enabled && (
+        <>
+          <Section title="شرکت و نمایشگاه">
+            <Field label="Company name" required hint={ref(config.company.name)} error={err('companyName')} warning={missing('companyName')}>
+              {en({ value: e.companyName, maxLength: LIMITS.short, onChange: ev => set({ companyName: ev.target.value }) })}
+            </Field>
+            <Field label="Exhibition name" required hint={ref(config.event.title)} error={err('title')} warning={missing('title')}>
+              {en({ value: e.title, maxLength: LIMITS.short, onChange: ev => set({ title: ev.target.value }) })}
+            </Field>
+            {shown('badge') && (
+              <Field label="Badge" hint={ref(config.event.badge)} error={err('badge')} warning={missing('badge')} action={!e.badge && <SuggestButton onClick={() => set({ badge: SUGGESTIONS_EN.badge })} />}>
+                {en({ value: e.badge, maxLength: LIMITS.short, onChange: ev => set({ badge: ev.target.value }), placeholder: SUGGESTIONS_EN.badge })}
+              </Field>
+            )}
+            {shown('tagline') && (
+              <Field label="Tagline" hint={ref(config.company.tagline)} error={err('tagline')} warning={missing('tagline')}>
+                {en({ value: e.tagline, maxLength: LIMITS.short, onChange: ev => set({ tagline: ev.target.value }) })}
+              </Field>
+            )}
+          </Section>
+
+          <Section title="متن‌ها">
+            {shown('welcomeText') && (
+              <Field label="Welcome line" hint={ref(config.event.welcomeText)} error={err('welcomeText')} warning={missing('welcomeText')} action={!e.welcomeText && <SuggestButton onClick={() => set({ welcomeText: SUGGESTIONS_EN.welcomeText })} />}>
+                {en({ value: e.welcomeText, maxLength: LIMITS.text, onChange: ev => set({ welcomeText: ev.target.value }) })}
+              </Field>
+            )}
+            {shown('letter') && (
+              <Field label="Invitation letter" hint="Leave a blank line between paragraphs. {company}, {event} and {guest} are replaced automatically." error={err('letter')} warning={missing('letter')} action={!e.letter.trim() && <SuggestButton onClick={() => set({ letter: SUGGESTIONS_EN.letter })} />}>
+                <TextArea dir="ltr" className="text-left" rows={8} maxLength={LIMITS.letter} value={e.letter} onChange={ev => set({ letter: ev.target.value })} />
+              </Field>
+            )}
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Field label="Enter button">{en({ value: e.enterButton, maxLength: LIMITS.button, onChange: ev => set({ enterButton: ev.target.value }) })}</Field>
+              <Field label="Details button">{en({ value: e.detailsButton, maxLength: LIMITS.button, onChange: ev => set({ detailsButton: ev.target.value }) })}</Field>
+              {shown('boothMap') && <Field label="Booth map button">{en({ value: e.mapButton, maxLength: LIMITS.button, onChange: ev => set({ mapButton: ev.target.value }) })}</Field>}
+              {shown('share') && <Field label="Share button">{en({ value: e.shareButton, maxLength: LIMITS.button, onChange: ev => set({ shareButton: ev.target.value }) })}</Field>}
+            </div>
+          </Section>
+
+          <Section title="زمان و مکان">
+            {shown('date') && (
+              <Field label="Date label" hint={`Generated automatically: ${englishDateLabel(config.event.startDate, config.event.endDate) || '—'}`}>
+                {en({ value: e.dateLabel, maxLength: LIMITS.short, onChange: ev => set({ dateLabel: ev.target.value }), placeholder: englishDateLabel(config.event.startDate, config.event.endDate) || 'Automatic' })}
+              </Field>
+            )}
+            {shown('time') && (
+              <Field label="Hours label" hint={`Generated automatically: ${englishTimeLabel(config.event.startTime, config.event.endTime, config.event.timezone) || '—'}`}>
+                {en({ value: e.timeLabel, maxLength: LIMITS.short, onChange: ev => set({ timeLabel: ev.target.value }), placeholder: englishTimeLabel(config.event.startTime, config.event.endTime, config.event.timezone) || 'Automatic' })}
+              </Field>
+            )}
+            {shown('location') && (
+              <Field label="Venue" hint={ref(config.event.location)} error={err('location')} warning={missing('location')}>
+                {en({ value: e.location, maxLength: LIMITS.short, onChange: ev => set({ location: ev.target.value }) })}
+              </Field>
+            )}
+            {shown('booth') && (
+              <Field label="Hall & booth" hint={ref(config.event.booth)} error={err('booth')} warning={missing('booth')}>
+                {en({ value: e.booth, maxLength: LIMITS.short, onChange: ev => set({ booth: ev.target.value }), placeholder: 'Hall 5, Booth 12' })}
+              </Field>
+            )}
+          </Section>
+        </>
+      )}
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ 7. guests
+
+export function GuestsStep({ config, update, previewAt }: StepProps) {
+  const r = config.rsvp;
+  return (
+    <>
+      <Section title="متن خطاب در لینک‌های شخصی" description="وقتی مهمان با لینک شخصی وارد شود، این جمله بالای متن دعوتنامه نمایش داده می‌شود. {guest} با نام مهمان جایگزین می‌شود." onFocusCapture={() => previewAt(2)}>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="فارسی">
+            <TextInput value={config.texts.guestGreeting} maxLength={LIMITS.short} onChange={e => update('texts', { guestGreeting: e.target.value })} placeholder="{guest} گرامی" />
+          </Field>
+          {config.en.enabled && (
+            <Field label="English">
+              <TextInput dir="ltr" className="text-left" value={config.en.guestGreeting} maxLength={LIMITS.short} onChange={e => update('en', { guestGreeting: e.target.value })} placeholder="Dear {guest}," />
+            </Field>
+          )}
+        </div>
+      </Section>
+
+      <Section title="اعلام حضور (RSVP)" description="مهمان با دکمه «اعلام حضور» نام، روز حضور و تعداد نفرات را ثبت می‌کند تا شرکت برای هر روز آماده باشد." onFocusCapture={() => previewAt(3)}>
+        <Toggle checked={r.enabled} onChange={enabled => update('rsvp', { enabled })} label="فرم اعلام حضور فعال باشد" />
+        {r.enabled && (
+          <>
+            <div className="flex flex-wrap gap-4">
+              <Toggle checked={r.askPhone} onChange={askPhone => update('rsvp', { askPhone })} label="پرسیدن شماره تماس" />
+              <Toggle checked={r.askCompany} onChange={askCompany => update('rsvp', { askCompany })} label="پرسیدن نام شرکت/سازمان" />
+            </div>
+            <Field label="توضیح حریم خصوصی زیر فرم" hint="به مهمان بگویید اطلاعاتش برای چه استفاده می‌شود.">
+              <TextArea rows={2} maxLength={LIMITS.text} value={r.note} onChange={e => update('rsvp', { note: e.target.value })} />
+            </Field>
+          </>
+        )}
       </Section>
     </>
   );

@@ -231,12 +231,15 @@ export function UploadButton({
   label = 'بارگذاری فایل',
   compact,
   maxImageDim,
+  trim,
 }: {
   kind: UploadKind;
   onUploaded: (r: UploadResult) => void;
   label?: string;
   compact?: boolean;
   maxImageDim?: number;
+  /** Remove empty margins around logos */
+  trim?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<UploadPhase | null>(null);
@@ -251,7 +254,7 @@ export function UploadButton({
     setProgress(0);
     setPhase('preparing');
     try {
-      const r = await uploadFile(file, kind, { onProgress: setProgress, onPhase: setPhase, maxImageDim });
+      const r = await uploadFile(file, kind, { onProgress: setProgress, onPhase: setPhase, maxImageDim, trim });
       if (r.note) setNote(r.note);
       onUploaded(r);
     } catch (e) {
@@ -295,6 +298,7 @@ export function ImageUpload({
   maxImageDim,
   hide,
   warning,
+  trim,
 }: {
   label: string;
   hint?: string;
@@ -302,6 +306,7 @@ export function ImageUpload({
   onChange: (v: string) => void;
   dark?: boolean;
   maxImageDim?: number;
+  trim?: boolean;
   hide?: HideProps;
   warning?: string;
 }) {
@@ -318,7 +323,7 @@ export function ImageUpload({
           )}
         </div>
         <div className="flex flex-col gap-2 items-start min-w-0">
-          <UploadButton kind="image" maxImageDim={maxImageDim} onUploaded={r => onChange(r.url)} label={value ? 'تغییر تصویر' : 'بارگذاری تصویر'} compact />
+          <UploadButton kind="image" maxImageDim={maxImageDim} trim={trim} onUploaded={r => onChange(r.url)} label={value ? 'تغییر تصویر' : 'بارگذاری تصویر'} compact />
           {value && (
             <button type="button" onClick={() => onChange('')} className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:underline">
               <X className="w-3.5 h-3.5" /> حذف

@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy, ExternalLink, CalendarX, TriangleAlert } from 'lucide-react';
-import { CUSTOM_FONT, fillPlaceholders, isFilled, isMissing, isShown, ITEMS, safeUrl, type InvitationConfig, type ItemKey } from '../shared/invitation';
-import { eventEnded, googleCalendarUrl, icsContent, jalaliRangeLabel, timeRangeLabel } from '../shared/calendar';
+import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy, ExternalLink, CalendarX, TriangleAlert, Phone, Mail, Globe, Send, MessageCircle, UserPlus, CircleCheck, X, Languages } from 'lucide-react';
+import { contactLinks, CUSTOM_FONT, fillPlaceholders, isFilled, isMissing, isShown, ITEMS, localize, safeUrl, type ContactLink, type InvitationConfig, type ItemKey, type Lang } from '../shared/invitation';
+import { dateText as dateTextOf, dayCount, eventEnded, googleCalendarUrl, icsContent, timeText as timeTextOf } from '../shared/calendar';
+import { vcardContent } from '../shared/vcard';
+import { strings } from './i18n';
 import { themeColors } from '../shared/color';
 import { apiUrl, asset } from '../lib/paths';
 
@@ -79,13 +81,83 @@ export interface InvitationViewProps {
   shareUrl?: string;
   /** Draft previews: show every missing (not hidden) item as a red placeholder. */
   showMissing?: boolean;
+  /** Name from a personal link (?to=...) */
+  guestName?: string;
+  /** Initial language (?lang=en); guests can switch when the English version is enabled */
+  initialLang?: Lang;
+  /** Force a language (the wizard shows English while the English step is edited) */
+  forcedLang?: Lang;
+  /** Analytics hook (published invitations only) */
+  onEvent?: (type: string) => void;
+  /** Send an attendance confirmation; absent in previews (nothing is stored there) */
+  onRsvp?: (data: RsvpData) => Promise<void>;
 }
 
-export default function InvitationView({ config, embedded = false, focus, shareUrl, showMissing = false }: InvitationViewProps) {
-  const { company, event, texts, theme, media, footer } = config;
-  const shown = (k: ItemKey) => isShown(config, k);
-  const miss = (k: ItemKey) => showMissing && isMissing(config, k);
-  const ready = (k: ItemKey) => shown(k) && isFilled(config, k);
+export interface RsvpData {
+  name: string;
+  phone: string;
+  org: string;
+  day: string;
+  count: number;
+  guest: string;
+  lang: Lang;
+}
+
+const CONTACT_ICONS: Record<ContactLink['kind'], React.ComponentType<{ className?: string }>> = {
+  phone: Phone,
+  whatsapp: MessageCircle,
+  email: Mail,
+  website: Globe,
+  instagram: InstagramIcon,
+  telegram: Send,
+};
+
+/** Data-saver / very slow connection: skip the background video. */
+function prefersLowData(): boolean {
+  const conn = (navigator as any).connection;
+  return !!conn && (conn.saveData === true || /(^|-)2g$/.test(conn.effectiveType || ''));
+}
+
+/** Exhibition days as YYYY-MM-DD (for the RSVP day picker). */
+function eventDays(start: string, end: string): string[] {
+  if (!start) return [];
+  const n = Math.min(dayCount(start, end), 14);
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(`${start}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
+function dayLabel(iso: string, lang: Lang): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  return lang === 'en'
+    ? new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(d)
+    : new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(d);
+}
+
+export default function InvitationView({ config, embedded = false, focus, shareUrl, showMissing = false, guestName = '', initialLang = 'fa', forcedLang, onEvent, onRsvp }: InvitationViewProps) {
+  const [userLang, setUserLang] = useState<Lang>(initialLang);
+  useEffect(() => {
+    if (forcedLang) setUserLang(forcedLang);
+  }, [forcedLang]);
+  const lang: Lang = config.en.enabled ? userLang : 'fa';
+  const T = strings(lang);
+  const isEn = lang === 'en';
+  const NextIcon = isEn ? ChevronRight : ChevronLeft;
+  const BackIcon = isEn ? ChevronLeft : ChevronRight;
+  /** The invitation in the current language (English texts replace the Persian ones). */
+  const L = useMemo(() => localize(config, lang), [config, lang]);
+  const { company, event, texts } = L;
+  const { theme, media, footer } = config;
+  const shown = (k: ItemKey) => isShown(L, k);
+  const miss = (k: ItemKey) => showMissing && isMissing(L, k);
+  const ready = (k: ItemKey) => shown(k) && isFilled(L, k);
+  const track = (type: string) => onEvent?.(type);
+  const lowData = useMemo(() => !embedded && typeof navigator !== 'undefined' && prefersLowData(), [embedded]);
+  const rsvpKey = `rsvp-done:${config.slug}`;
+  const [rsvpOpen, setRsvpOpen] = useState(false);
+  const [rsvpDone, setRsvpDone] = useState(() => !embedded && typeof localStorage !== 'undefined' && !!localStorage.getItem(rsvpKey));
   const hasMap = ready('boothMap');
   const [step, setStep] = useState(1);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -233,6 +305,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
 
   const enter = () => {
     goTo(2);
+    track('enter');
     const audio = audioRef.current;
     if (!embedded && audio && audio.paused && !userMutedRef.current) startAudio().catch(() => {});
   };
@@ -248,9 +321,9 @@ export default function InvitationView({ config, embedded = false, focus, shareU
 
   const handleShare = async () => {
     const url = pageUrl();
+    track('share');
     const text =
-      fillPlaceholders(texts.shareText, config) ||
-      `دعوتنامه ${event.title}\nزمان: ${event.dateLabel}\nمکان: ${event.location}${event.booth ? `\n${event.booth}` : ''}`;
+      fillPlaceholders(texts.shareText, L, guestName) || T.shareText(event.title, dateText, ready('location') ? event.location : '', ready('booth') ? event.booth : '');
     if (navigator.share) {
       try {
         await navigator.share({ title: event.title, text, url });
@@ -259,17 +332,24 @@ export default function InvitationView({ config, embedded = false, focus, shareU
         if ((e as Error)?.name === 'AbortError') return; // user closed the share sheet
       }
     }
-    showToast((await copyText(url)) ? 'لینک دعوتنامه کپی شد' : 'مرورگر شما از این قابلیت پشتیبانی نمی‌کند');
+    showToast((await copyText(url)) ? T.copied : T.unsupported);
   };
 
   const calendarReady = ready('calendar') && !ended;
-  const gcalUrl = useMemo(() => (calendarReady ? googleCalendarUrl(config) : '#'), [config, calendarReady]);
-  // Published invitations get a real .ics from the server (much more reliable on iOS / in-app browsers).
+  const gcalUrl = useMemo(() => (calendarReady ? googleCalendarUrl(config, lang) : '#'), [config, calendarReady, lang]);
+  // Published invitations get real .ics/.vcf files from the server (much more reliable on iOS / in-app browsers).
+  const live = !embedded && !showMissing && !!config.slug;
   const icsUrl = useMemo(() => {
     if (!calendarReady) return '#';
-    if (!embedded && config.slug) return apiUrl(`invitations/${config.slug}/ics`);
-    return `data:text/calendar;charset=utf-8,${encodeURIComponent(icsContent(config))}`;
-  }, [config, calendarReady, embedded]);
+    if (live) return apiUrl(`invitations/${config.slug}/ics?lang=${lang}`);
+    return `data:text/calendar;charset=utf-8,${encodeURIComponent(icsContent(config, lang))}`;
+  }, [config, calendarReady, live, lang]);
+  const contacts = useMemo(() => contactLinks(config.contact), [config.contact]);
+  const vcardUrl = useMemo(() => {
+    if (!contacts.some(c => c.kind === 'phone' || c.kind === 'email' || c.kind === 'whatsapp')) return '';
+    if (live) return apiUrl(`invitations/${config.slug}/vcard?lang=${lang}`);
+    return `data:text/vcard;charset=utf-8,${encodeURIComponent(vcardContent(config, lang))}`;
+  }, [config, contacts, live, lang]);
 
   // ---------- theming ----------
   const colors = useMemo(() => themeColors(theme), [theme]);
@@ -286,7 +366,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
     fontFamily: `'${fontFamily}', 'Vazirmatn', Tahoma, sans-serif`,
   } as React.CSSProperties;
 
-  const letterParagraphs = fillPlaceholders(texts.letter, config)
+  const letterParagraphs = fillPlaceholders(texts.letter, L, guestName)
     .split(/\n\s*\n/)
     .map(p => p.trim())
     .filter(Boolean);
@@ -296,8 +376,8 @@ export default function InvitationView({ config, embedded = false, focus, shareU
   const spring = { duration: 0.8, type: 'spring' as const, bounce: 0.4 };
   const btnPrimary = 'animate-gradient-btn hover:scale-[1.02] hover:shadow-[0_10px_25px_rgba(0,0,0,0.35)]';
   const poster = ready('video') ? asset(media.videoPoster) : '';
-  const dateText = event.dateLabel || jalaliRangeLabel(event.startDate, event.endDate);
-  const timeText = event.timeLabel || timeRangeLabel(event.startTime, event.endTime, event.timezone);
+  const dateText = dateTextOf(config, lang);
+  const timeText = timeTextOf(config, lang);
   const mapUrlShown = ready('mapUrl') ? mapUrl : '';
 
   const locationInner = (
@@ -311,7 +391,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
         {mapUrlShown && (
           <span className="text-xs @2xl:text-sm text-(--c-accent-ink) font-bold mt-1 opacity-80 group-hover:opacity-100 flex items-center gap-1">
             <Map className="w-3.5 h-3.5 @2xl:w-4 @2xl:h-4" />
-            برای مسیریابی روی نقشه کلیک کنید
+            {T.mapHint}
           </span>
         )}
       </div>
@@ -330,24 +410,24 @@ export default function InvitationView({ config, embedded = false, focus, shareU
     >
       <button
         onClick={() => goBack(3)}
-        aria-label="بازگشت"
+        aria-label={T.back}
         className="absolute top-20 left-6 z-[110] bg-white/30 hover:bg-white/50 backdrop-blur-md p-3 rounded-full text-slate-800 transition-all shadow-md border border-white/40 flex items-center justify-center"
       >
-        <ChevronRight className="w-5 h-5" />
+        <BackIcon className="w-5 h-5" />
       </button>
       {mapState !== 'loaded' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-(--c-fg) px-8 text-center">
           {mapState === 'loading' ? (
             <>
               <div className="w-10 h-10 border-4 border-slate-500/40 border-t-(--c-accent) rounded-full animate-spin" />
-              <span className="font-bold">در حال بارگذاری نقشه...</span>
+              <span className="font-bold">{T.mapLoading}</span>
             </>
           ) : (
-            <span className="font-bold leading-relaxed">بارگذاری نقشه طول کشیده است. می‌توانید آن را در صفحه جدید باز کنید.</span>
+            <span className="font-bold leading-relaxed">{T.mapSlow}</span>
           )}
         </div>
       )}
-      <iframe src={boothMapUrl} onLoad={() => setMapState('loaded')} className="w-full h-full border-0 absolute inset-0" title="نقشه غرفه" allow="fullscreen; accelerometer; gyroscope" />
+      <iframe src={boothMapUrl} onLoad={() => setMapState('loaded')} className="w-full h-full border-0 absolute inset-0" title={T.mapTitle} allow="fullscreen; accelerometer; gyroscope" />
       {/* Many sites refuse to be framed – always offer a way out. */}
       <a
         href={boothMapUrl}
@@ -356,14 +436,15 @@ export default function InvitationView({ config, embedded = false, focus, shareU
         className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[110] inline-flex items-center gap-2 whitespace-nowrap bg-slate-900/80 backdrop-blur text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-xl"
       >
         <ExternalLink className="w-4 h-4" />
-        باز کردن نقشه در صفحه جدید
+        {T.openMap}
       </a>
     </motion.div>
   );
 
   return (
     <div
-      dir="rtl"
+      dir={isEn ? 'ltr' : 'rtl'}
+      lang={lang}
       style={themeStyle}
       className={`@container ${embedded ? 'h-full overflow-y-auto overflow-x-hidden' : 'min-h-[100dvh] overflow-hidden'} flex flex-col px-5 py-2 @2xl:p-6 relative bg-(--c-bg) text-(--c-fg)`}
     >
@@ -388,7 +469,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
             className="absolute inset-0 w-full h-full object-cover @3xl:blur-2xl @3xl:scale-110"
           />
         )}
-        {ready('video') && (
+        {ready('video') && !lowData && (
           <video
             key={media.video}
             ref={videoRef}
@@ -427,11 +508,26 @@ export default function InvitationView({ config, embedded = false, focus, shareU
       {ready('music') && (
         <button
           onClick={toggleMusic}
-          aria-label={isMusicPlaying ? 'قطع صدا' : 'پخش صدا'}
-          title={isMusicPlaying ? 'قطع صدا' : 'پخش صدا'}
+          aria-label={isMusicPlaying ? T.mute : T.unmute}
+          title={isMusicPlaying ? T.mute : T.unmute}
           className="absolute top-6 left-6 z-50 bg-white/30 hover:bg-white/50 backdrop-blur-md p-3 rounded-full text-slate-800 transition-all shadow-md border border-white/40 flex items-center justify-center"
         >
           {isMusicPlaying ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5 text-slate-600" />}
+        </button>
+      )}
+
+      {config.en.enabled && (
+        <button
+          onClick={() => {
+            const next = isEn ? 'fa' : 'en';
+            setUserLang(next);
+            if (next === 'en') track('en');
+          }}
+          className="absolute top-6 right-6 z-50 bg-white/30 hover:bg-white/50 backdrop-blur-md px-3.5 py-2.5 rounded-full text-slate-800 text-xs font-black transition-all shadow-md border border-white/40 flex items-center gap-1.5"
+          style={{ fontFamily: isEn ? "'Vazirmatn', sans-serif" : undefined }}
+        >
+          <Languages className="w-4 h-4" />
+          {T.langSwitch}
         </button>
       )}
 
@@ -452,9 +548,10 @@ export default function InvitationView({ config, embedded = false, focus, shareU
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6, duration: 0.8 }} className="bg-white/90 backdrop-blur-xl p-5 @2xl:p-8 rounded-3xl border border-white/50 shadow-2xl">
                 {ended && (
                   <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100 rounded-full px-3 py-1">
-                    <CalendarX className="w-3.5 h-3.5" /> این رویداد به پایان رسیده است
+                    <CalendarX className="w-3.5 h-3.5" /> {T.ended}
                   </p>
                 )}
+                {guestName && <p className="mb-2 text-sm font-bold text-slate-500">{T.guestFor} {guestName}</p>}
                 <h1 className="text-3xl font-black text-(--c-primary-ink) mb-0 leading-tight relative z-10 break-words">
                   {ready('badge') && <span className="block text-(--c-accent-ink) text-xl mb-2 @2xl:mb-3 font-bold">{event.badge}</span>}
                   {miss('badge') && <Missing text={ITEMS.badge.missing} className="mb-2 text-xs py-1" />}
@@ -471,12 +568,12 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   <div className="h-4" />
                 )}
 
-                {ready('welcomeText') && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{event.welcomeText}</p>}
+                {ready('welcomeText') && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{fillPlaceholders(event.welcomeText, L, guestName)}</p>}
                 {miss('welcomeText') && <Missing text={ITEMS.welcomeText.missing} className="mb-4" />}
 
                 <button onClick={enter} className={`flex items-center justify-center gap-2 text-white px-8 py-4 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
                   <span className="text-lg">{texts.enterButton}</span>
-                  <ChevronLeft className="w-5 h-5" />
+                  <NextIcon className="w-5 h-5" />
                 </button>
               </motion.div>
             </motion.div>
@@ -497,6 +594,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
               )}
 
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className={`space-y-2 @2xl:space-y-3 ${shown('icon') ? 'pt-8 @2xl:pt-10' : 'pt-1'}`}>
+                {guestName && <p className="text-[15px] @2xl:text-[18px] font-black text-(--c-primary-ink)">{fillPlaceholders(texts.guestGreeting, L, guestName)}</p>}
                 {miss('letter') && <Missing text={ITEMS.letter.missing} className="py-8" />}
                 {(ready('letter') ? letterParagraphs : []).map((p, i) => (
                   <p key={i} className="text-[14.5px] @2xl:text-[17px] leading-[1.6] @2xl:leading-[1.7] font-medium text-justify whitespace-pre-line break-words">
@@ -511,14 +609,17 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                 {miss('tagline') && <Missing text={ITEMS.tagline.missing} className="mt-1.5 text-xs py-1" />}
               </motion.div>
 
-              <motion.button initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.6 }} onClick={() => goTo(3)} className={`mt-4 @2xl:mt-5 flex items-center justify-center gap-2 text-white px-6 @2xl:px-8 py-2.5 @2xl:py-3 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
+              <motion.button initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.6 }} onClick={() => {
+                  goTo(3);
+                  track('details');
+                }} className={`mt-4 @2xl:mt-5 flex items-center justify-center gap-2 text-white px-6 @2xl:px-8 py-2.5 @2xl:py-3 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
                 <span className="text-sm @2xl:text-base">{texts.detailsButton}</span>
-                <ChevronLeft className="w-4 h-4 @2xl:w-5 @2xl:h-5" />
+                <NextIcon className="w-4 h-4 @2xl:w-5 @2xl:h-5" />
               </motion.button>
 
               <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }} onClick={() => goBack(1)} className="mt-3 @2xl:mt-4 text-[13px] @2xl:text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors flex items-center justify-center gap-1 mx-auto w-full">
-                <ChevronRight className="w-4 h-4" />
-                بازگشت به صفحه قبل
+                <BackIcon className="w-4 h-4" />
+                {T.back}
               </motion.button>
             </motion.div>
           )}
@@ -560,7 +661,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                       </div>
                     )
                   ) : mapUrlShown ? (
-                    <motion.a initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} href={mapUrlShown} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 @2xl:gap-4 hover:text-(--c-accent-ink) transition-colors group">
+                    <motion.a initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} href={mapUrlShown} target="_blank" rel="noopener noreferrer" onClick={() => track('map')} className="flex items-center gap-3 @2xl:gap-4 hover:text-(--c-accent-ink) transition-colors group">
                       {locationInner}
                     </motion.a>
                   ) : (
@@ -573,11 +674,15 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   <motion.button
                     type="button"
                     disabled={!hasMap}
-                    onClick={() => hasMap && goTo(4)}
+                    onClick={() => {
+                      if (!hasMap) return;
+                      goTo(4);
+                      track('boothMap');
+                    }}
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.8 }}
-                    className="w-full text-right flex items-center gap-3 @2xl:gap-4 enabled:hover:text-(--c-accent-ink) transition-colors group pt-3 @2xl:pt-4 border-t border-slate-200"
+                    className="w-full text-start flex items-center gap-3 @2xl:gap-4 enabled:hover:text-(--c-accent-ink) transition-colors group pt-3 @2xl:pt-4 border-t border-slate-200"
                   >
                     <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
                       <Building className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
@@ -598,8 +703,22 @@ export default function InvitationView({ config, embedded = false, focus, shareU
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1 }} className="flex flex-col gap-2 @2xl:gap-3 mt-1 @2xl:mt-2">
                 {miss('boothMap') && <Missing text={ITEMS.boothMap.missing} className="py-3 mb-2" />}
+                {config.rsvp.enabled && !ended && (
+                  <button
+                    onClick={() => !rsvpDone && setRsvpOpen(true)}
+                    className={`flex items-center justify-center gap-2 w-full py-3 @2xl:py-4 px-6 rounded-2xl font-black shadow-lg transition-all mb-1 ${rsvpDone ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-(--c-primary-ink) border border-white hover:-translate-y-0.5'}`}
+                  >
+                    <CircleCheck className="w-5 h-5" />
+                    {rsvpDone ? T.rsvpDone : T.rsvp}
+                  </button>
+                )}
                 {hasMap && (
-                  <button onClick={() => goTo(4)} className={`flex items-center justify-center gap-2 @2xl:gap-3 w-full text-white py-3 @2xl:py-4 px-6 rounded-2xl font-bold transition-all shadow-lg mb-2 @2xl:mb-3 ${btnPrimary}`}>
+                  <button
+                    onClick={() => {
+                      goTo(4);
+                      track('boothMap');
+                    }}
+                    className={`flex items-center justify-center gap-2 @2xl:gap-3 w-full text-white py-3 @2xl:py-4 px-6 rounded-2xl font-bold transition-all shadow-lg mb-2 @2xl:mb-3 ${btnPrimary}`}>
                     <Map className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
                     <span className="text-base @2xl:text-lg">{texts.mapButton}</span>
                   </button>
@@ -607,13 +726,19 @@ export default function InvitationView({ config, embedded = false, focus, shareU
 
                 {calendarReady && (
                   <div className="flex gap-2 @2xl:gap-3 w-full">
-                    <a href={gcalUrl} target="_blank" rel="noopener noreferrer" className="flex flex-1 flex-col items-center justify-center gap-1.5 @2xl:gap-2 bg-white text-slate-800 py-2 @2xl:py-3 px-2 rounded-2xl font-bold transition-all shadow-lg border border-slate-100 hover:bg-slate-50 transform hover:-translate-y-1">
+                    <a href={gcalUrl} target="_blank" rel="noopener noreferrer" onClick={() => track('gcal')} className="flex flex-1 flex-col items-center justify-center gap-1.5 @2xl:gap-2 bg-white text-slate-800 py-2 @2xl:py-3 px-2 rounded-2xl font-bold transition-all shadow-lg border border-slate-100 hover:bg-slate-50 transform hover:-translate-y-1">
                       <GoogleIcon />
-                      <span className="text-[11px] @2xl:text-sm text-center leading-tight">ثبت در <br />گوگل کلندر</span>
+                      <span className="text-[11px] @2xl:text-sm text-center leading-tight">
+                        {T.gcal[0]} <br />
+                        {T.gcal[1]}
+                      </span>
                     </a>
-                    <a href={icsUrl} download="invite.ics" className="flex flex-1 flex-col items-center justify-center gap-1.5 @2xl:gap-2 bg-white text-slate-800 py-2 @2xl:py-3 px-2 rounded-2xl font-bold transition-all shadow-lg border border-slate-100 hover:bg-slate-50 transform hover:-translate-y-1">
+                    <a href={icsUrl} download="invite.ics" onClick={() => track('ics')} className="flex flex-1 flex-col items-center justify-center gap-1.5 @2xl:gap-2 bg-white text-slate-800 py-2 @2xl:py-3 px-2 rounded-2xl font-bold transition-all shadow-lg border border-slate-100 hover:bg-slate-50 transform hover:-translate-y-1">
                       <AppleIcon />
-                      <span className="text-[11px] @2xl:text-sm text-center leading-tight">ثبت در <br />اپل / اوت‌لوک</span>
+                      <span className="text-[11px] @2xl:text-sm text-center leading-tight">
+                        {T.ics[0]} <br />
+                        {T.ics[1]}
+                      </span>
                     </a>
                   </div>
                 )}
@@ -622,11 +747,11 @@ export default function InvitationView({ config, embedded = false, focus, shareU
 
                 {isInApp && calendarReady && (
                   <button
-                    onClick={async () => showToast((await copyText(pageUrl())) ? 'لینک کپی شد؛ آن را در مرورگر باز کنید' : 'لینک را از منوی بالای صفحه باز کنید')}
+                    onClick={async () => showToast((await copyText(pageUrl())) ? T.copiedOpenBrowser : T.openFromMenu)}
                     className="flex items-center justify-center gap-2 text-[11px] @2xl:text-xs text-white/90 bg-black/40 backdrop-blur rounded-xl py-2 px-3"
                   >
                     <Copy className="w-3.5 h-3.5 shrink-0" />
-                    برای ثبت در تقویم، صفحه را در مرورگر (کروم/سافاری) باز کنید — کپی لینک
+                    {T.inApp}
                   </button>
                 )}
 
@@ -637,9 +762,43 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   </button>
                 )}
 
+                {shown('contact') && contacts.length > 0 && (
+                  <div className="mt-1 bg-white/90 backdrop-blur-xl rounded-2xl p-3 @2xl:p-4 shadow-lg text-slate-800">
+                    <p className="text-xs font-black text-slate-500 mb-2 text-center">{T.contact}</p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {contacts.map(c => {
+                        const Icon = CONTACT_ICONS[c.kind];
+                        return (
+                          <a
+                            key={c.kind}
+                            href={c.href}
+                            target={c.kind === 'phone' || c.kind === 'email' ? undefined : '_blank'}
+                            rel="noopener noreferrer"
+                            onClick={() => track('contact')}
+                            title={c.label}
+                            className="flex flex-col items-center gap-1 w-16 py-2 rounded-xl hover:bg-(--c-accent)/10 transition-colors"
+                          >
+                            <span className="w-10 h-10 rounded-full bg-(--c-accent)/10 text-(--c-accent-ink) flex items-center justify-center">
+                              <Icon className="w-5 h-5" />
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-600">{T.contactLabels[c.kind]}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                    {vcardUrl && (
+                      <a href={vcardUrl} download={`${config.slug || 'contact'}.vcf`} onClick={() => track('vcard')} className="mt-2 flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        <UserPlus className="w-4 h-4" />
+                        {T.saveContact}
+                      </a>
+                    )}
+                  </div>
+                )}
+                {miss('contact') && <Missing text={ITEMS.contact.missing} />}
+
                 <button onClick={() => goBack(2)} className="mt-2 @2xl:mt-5 text-xs @2xl:text-sm font-semibold text-(--c-fg)/70 hover:text-(--c-fg) transition-colors flex items-center justify-center gap-1 mx-auto">
-                  <ChevronRight className="w-4 h-4" />
-                  بازگشت به صفحه قبل
+                  <BackIcon className="w-4 h-4" />
+                {T.back}
                 </button>
               </motion.div>
             </motion.div>
@@ -673,12 +832,142 @@ export default function InvitationView({ config, embedded = false, focus, shareU
       </AnimatePresence>
 
       <AnimatePresence>
+        {rsvpOpen && (
+          <RsvpForm
+            key="rsvp"
+            T={T}
+            lang={lang}
+            config={config}
+            guestName={guestName}
+            embedded={embedded}
+            onClose={() => setRsvpOpen(false)}
+            onSubmit={async data => {
+              if (!onRsvp) {
+                setRsvpOpen(false);
+                showToast(isEn ? 'Preview only — nothing was saved' : 'در پیش‌نمایش ثبت نمی‌شود');
+                return;
+              }
+              await onRsvp(data);
+              localStorage.setItem(rsvpKey, '1');
+              setRsvpDone(true);
+              setRsvpOpen(false);
+              showToast(T.thanks);
+            }}
+          />
+        )}
         {toast && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className={`${embedded ? 'absolute' : 'fixed'} bottom-6 left-1/2 -translate-x-1/2 z-[120] bg-slate-900/90 text-white text-sm font-bold px-4 py-2.5 rounded-full shadow-xl whitespace-nowrap`}>
+          <motion.div dir="auto" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className={`${embedded ? 'absolute' : 'fixed'} bottom-6 left-1/2 -translate-x-1/2 z-[160] bg-slate-900/90 text-white text-sm font-bold px-4 py-2.5 rounded-2xl shadow-xl w-max max-w-[90%] text-center`}>
             {toast}
           </motion.div>
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function RsvpForm({
+  T,
+  lang,
+  config,
+  guestName,
+  embedded,
+  onClose,
+  onSubmit,
+}: {
+  T: ReturnType<typeof strings>;
+  lang: Lang;
+  config: InvitationConfig;
+  guestName: string;
+  embedded: boolean;
+  onClose: () => void;
+  onSubmit: (d: RsvpData) => Promise<void>;
+}) {
+  const [name, setName] = useState(guestName);
+  const [phone, setPhone] = useState('');
+  const [org, setOrg] = useState('');
+  const days = eventDays(config.event.startDate, config.event.endDate);
+  const [day, setDay] = useState(days.length === 1 ? days[0] : '');
+  const [count, setCount] = useState(1);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const input = 'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-(--c-accent) text-sm';
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return setError(T.nameRequired);
+    setBusy(true);
+    setError('');
+    try {
+      await onSubmit({ name: name.trim(), phone: phone.trim(), org: org.trim(), day, count, guest: guestName, lang });
+    } catch {
+      setError(T.sendFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className={`${embedded ? 'absolute' : 'fixed'} inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-end @md:items-center justify-center p-3`}
+      onClick={onClose}
+    >
+      <motion.form
+        initial={{ y: 40 }}
+        animate={{ y: 0 }}
+        onSubmit={submit}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-5 space-y-3 text-slate-800 max-h-[90%] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="font-black text-lg text-(--c-primary-ink)">{T.rsvpTitle}</h2>
+          <button type="button" onClick={onClose} aria-label={T.cancel} className="p-1.5 rounded-lg hover:bg-slate-100">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <label className="block text-xs font-bold text-slate-600">
+          {T.name}
+          <input value={name} onChange={e => setName(e.target.value)} maxLength={120} className={`${input} mt-1`} autoComplete="name" />
+        </label>
+        {config.rsvp.askPhone && (
+          <label className="block text-xs font-bold text-slate-600">
+            {T.phone} <span className="font-normal text-slate-400">{T.optional}</span>
+            <input value={phone} onChange={e => setPhone(e.target.value)} maxLength={40} inputMode="tel" dir="ltr" className={`${input} mt-1`} autoComplete="tel" />
+          </label>
+        )}
+        {config.rsvp.askCompany && (
+          <label className="block text-xs font-bold text-slate-600">
+            {T.org} <span className="font-normal text-slate-400">{T.optional}</span>
+            <input value={org} onChange={e => setOrg(e.target.value)} maxLength={120} className={`${input} mt-1`} autoComplete="organization" />
+          </label>
+        )}
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          {days.length > 1 && (
+            <label className="block text-xs font-bold text-slate-600">
+              {T.day}
+              <select value={day} onChange={e => setDay(e.target.value)} className={`${input} mt-1`}>
+                <option value="">{T.notSure}</option>
+                {days.map(d => (
+                  <option key={d} value={d}>
+                    {dayLabel(d, lang)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className={`block text-xs font-bold text-slate-600 ${days.length > 1 ? '' : 'col-span-2'}`}>
+            {T.count}
+            <input type="number" min={1} max={20} value={count} onChange={e => setCount(Math.min(20, Math.max(1, Number(e.target.value) || 1)))} className={`${input} mt-1 w-24`} />
+          </label>
+        </div>
+        {config.rsvp.note && <p className="text-[11px] text-slate-500 leading-relaxed">{config.rsvp.note}</p>}
+        {error && <p className="text-xs font-bold text-rose-600">{error}</p>}
+        <button disabled={busy} className="w-full rounded-2xl py-3 font-black text-white animate-gradient-btn disabled:opacity-60">
+          {T.submit}
+        </button>
+      </motion.form>
+    </motion.div>
   );
 }

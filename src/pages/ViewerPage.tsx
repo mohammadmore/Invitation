@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import InvitationView from '../invitation/InvitationView';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, trackEvent } from '../lib/api';
 import { asset, inviteUrl } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
 import { CUSTOM_FONT, type InvitationConfig } from '../shared/invitation';
@@ -15,9 +15,25 @@ function loadImage(src: string) {
   });
 }
 
+const params = new URLSearchParams(window.location.search);
+/** Personal link: ?to=Name (kept short and plain-text) */
+const guestName = (params.get('to') || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 80);
+const initialLang = params.get('lang') === 'en' ? 'en' : 'fa';
+
 export default function ViewerPage({ slug }: { slug: string }) {
   const [config, setConfig] = useState<InvitationConfig | null>(null);
   const [error, setError] = useState<'notfound' | 'network' | null>(null);
+
+  useEffect(() => {
+    if (!config) return;
+    trackEvent(config.slug, 'view');
+    const seenKey = `seen:${config.slug}`;
+    if (!localStorage.getItem(seenKey)) {
+      localStorage.setItem(seenKey, '1');
+      trackEvent(config.slug, 'unique');
+    }
+    if (guestName) trackEvent(config.slug, 'personal');
+  }, [config]);
 
   useEffect(() => {
     api
@@ -64,5 +80,16 @@ export default function ViewerPage({ slug }: { slug: string }) {
     );
   }
   if (!config) return null;
-  return <InvitationView config={config} shareUrl={inviteUrl(config.slug)} />;
+  return (
+    <InvitationView
+      config={config}
+      shareUrl={inviteUrl(config.slug)}
+      guestName={guestName}
+      initialLang={initialLang}
+      onEvent={type => trackEvent(config.slug, type)}
+      onRsvp={async data => {
+        await api.rsvp(config.slug, data);
+      }}
+    />
+  );
 }

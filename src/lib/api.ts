@@ -1,4 +1,4 @@
-import type { InvitationConfig, Issue, IssueField } from '../shared/invitation';
+import type { CopyMode, InvitationConfig, Issue, IssueField, Lang } from '../shared/invitation';
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, VIDEO_WARN_MB, type UploadKind } from '../shared/uploads';
 import { apiUrl } from './paths';
 
@@ -32,6 +32,8 @@ export class ApiError extends Error {
     public status: number,
     public field?: IssueField,
     public issues?: Issue[],
+    /** On a 409 edit conflict: the record as it is now on the server */
+    public conflictRecord?: RecordView,
   ) {
     super(message);
   }
@@ -49,7 +51,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError('ارتباط با سرور برقرار نشد؛ اتصال اینترنت را بررسی کنید.', 0);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error || `خطا (${res.status})`, res.status, data.field, data.issues);
+  if (!res.ok) throw new ApiError(data.error || `خطا (${res.status})`, res.status, data.field, data.issues, data.conflict ? data.record : undefined);
   return data as T;
 }
 
@@ -67,6 +69,23 @@ export interface RecordSummary {
   event: string;
   status: RecordStatus;
   updatedAt: string;
+  endDate: string;
+  ended: boolean;
+  revision: number;
+  views: number;
+  rsvps: number;
+  openFeedback: number;
+  approved: boolean;
+}
+
+export interface Feedback {
+  id: string;
+  at: string;
+  name: string;
+  message: string;
+  approved: boolean;
+  revision: number;
+  resolved: boolean;
 }
 
 export interface RecordView extends RecordSummary {
@@ -74,6 +93,34 @@ export interface RecordView extends RecordSummary {
   previewToken: string;
   publishedAt: string | null;
   publishedSlug: string;
+  feedback: Feedback[];
+}
+
+export interface HistoryEntry {
+  index: number;
+  at: string;
+  kind: 'auto' | 'publish' | 'before-restore';
+  revision: number;
+  company: string;
+  event: string;
+  draft: InvitationConfig;
+}
+
+export interface Rsvp {
+  id: string;
+  at: string;
+  name: string;
+  phone: string;
+  org: string;
+  day: string;
+  count: number;
+  guest: string;
+  lang: Lang;
+}
+
+export interface Stats {
+  totals: Record<string, number>;
+  days: Record<string, Record<string, number>>;
 }
 
 export const api = {
@@ -84,12 +131,23 @@ export const api = {
   /** Published invitation (guests) */
   get: (slug: string) => request<InvitationConfig>('GET', `invitations/${encodeURIComponent(slug)}`),
   /** Draft preview for the client (read-only token) */
-  preview: (id: string, token: string) => request<{ config: InvitationConfig; published: boolean; updatedAt: string }>('GET', `preview/${encodeURIComponent(id)}?k=${encodeURIComponent(token)}`),
+  preview: (id: string, token: string) => request<{ config: InvitationConfig; published: boolean; updatedAt: string; revision: number }>('GET', `preview/${encodeURIComponent(id)}?k=${encodeURIComponent(token)}`),
+  sendFeedback: (id: string, token: string, body: { name: string; message: string; approved: boolean; revision: number }) =>
+    request<{ ok: boolean }>('POST', `preview/${encodeURIComponent(id)}/feedback?k=${encodeURIComponent(token)}`, body),
+  rsvp: (slug: string, body: { name: string; phone: string; org: string; day: string; count: number; guest: string; lang: Lang }) => request<{ ok: boolean }>('POST', `invitations/${encodeURIComponent(slug)}/rsvp`, body),
   list: () => request<RecordSummary[]>('GET', 'records'),
   getRecord: (id: string) => request<RecordView>('GET', `records/${encodeURIComponent(id)}`),
   createRecord: (config: InvitationConfig) => request<RecordView & { editToken: string; slugConflict: boolean }>('POST', 'records', { config }),
-  saveRecord: (id: string, config: InvitationConfig) => request<RecordView & { slugConflict: boolean }>('PUT', `records/${encodeURIComponent(id)}`, { config }),
-  publish: (id: string, config: InvitationConfig) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/publish`, { config }),
+  saveRecord: (id: string, config: InvitationConfig, baseRevision?: number, force = false) =>
+    request<RecordView & { slugConflict: boolean }>('PUT', `records/${encodeURIComponent(id)}`, { config, baseRevision, force }),
+  publish: (id: string, config: InvitationConfig, baseRevision?: number) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/publish`, { config, baseRevision }),
+  history: (id: string) => request<HistoryEntry[]>('GET', `records/${encodeURIComponent(id)}/history`),
+  restore: (id: string, source: { index: number } | { source: 'published' }) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/restore`, source),
+  duplicate: (id: string, mode: CopyMode) => request<RecordView & { editToken: string }>('POST', `records/${encodeURIComponent(id)}/duplicate`, { mode }),
+  resolveFeedback: (id: string, fid: string, resolved: boolean) => request<{ ok: boolean }>('POST', `records/${encodeURIComponent(id)}/feedback/${fid}`, { resolved }),
+  rsvps: (id: string) => request<Rsvp[]>('GET', `records/${encodeURIComponent(id)}/rsvps`),
+  deleteRsvp: (id: string, rid: string) => request<{ ok: boolean }>('DELETE', `records/${encodeURIComponent(id)}/rsvps/${rid}`),
+  stats: (id: string) => request<Stats>('GET', `records/${encodeURIComponent(id)}/stats`),
   unpublish: (id: string) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/unpublish`),
   remove: (id: string) => request<{ ok: boolean }>('DELETE', `records/${encodeURIComponent(id)}`),
   /** Admin only: issue a new edit link (the old one stops working). */
@@ -139,13 +197,42 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
 }
 
 /**
- * Resize/re-encode raster images in the browser: keeps uploads small for guests and
- * converts iPhone HEIC photos (where the browser can decode them) to WebP.
+ * Bounding box of the real content: ignores transparent margins, or margins of the same
+ * colour as all four corners (white/coloured padding around a logo). null = nothing to trim.
  */
-async function prepareImage(file: File, maxDim: number): Promise<{ blob: Blob; name: string }> {
+function contentBox(ctx: CanvasRenderingContext2D, w: number, h: number): { x: number; y: number; w: number; h: number } | null {
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const px = (x: number, y: number) => (y * w + x) * 4;
+  const corners = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
+  const transparent = corners.every(i => data[i + 3] < 16);
+  const ref = corners[0];
+  const near = (i: number, j: number) => Math.abs(data[i] - data[j]) + Math.abs(data[i + 1] - data[j + 1]) + Math.abs(data[i + 2] - data[j + 2]) < 36;
+  const uniform = !transparent && corners.every(i => near(i, ref) && data[i + 3] > 240);
+  if (!transparent && !uniform) return null;
+  const isBg = (i: number) => (transparent ? data[i + 3] < 16 : data[i + 3] > 240 && near(i, ref));
+  let top = 0, bottom = h - 1, left = 0, right = w - 1;
+  const rowBg = (y: number) => { for (let x = 0; x < w; x++) if (!isBg(px(x, y))) return false; return true; };
+  const colBg = (x: number) => { for (let y = top; y <= bottom; y++) if (!isBg(px(x, y))) return false; return true; };
+  while (top < bottom && rowBg(top)) top++;
+  while (bottom > top && rowBg(bottom)) bottom--;
+  while (left < right && colBg(left)) left++;
+  while (right > left && colBg(right)) right--;
+  const bw = right - left + 1, bh = bottom - top + 1;
+  if (bw < 4 || bh < 4 || (bw > w * 0.97 && bh > h * 0.97)) return null; // empty image or nothing worth trimming
+  const pad = Math.round(Math.max(bw, bh) * 0.03);
+  const x = Math.max(0, left - pad), y = Math.max(0, top - pad);
+  return { x, y, w: Math.min(w, right + pad + 1) - x, h: Math.min(h, bottom + pad + 1) - y };
+}
+
+/**
+ * Resize/re-encode raster images in the browser: keeps uploads small for guests, converts
+ * iPhone HEIC photos (where the browser can decode them) to WebP, and optionally trims empty
+ * margins around logos so they don't look tiny on the invitation.
+ */
+async function prepareImage(file: File, maxDim: number, trim = false): Promise<{ blob: Blob; name: string; trimmed: boolean }> {
   const ext = extOf(file.name);
   const isHeic = ext === 'heic' || ext === 'heif' || /heic|heif/.test(file.type);
-  if (ext === 'svg' || ext === 'gif') return { blob: file, name: file.name };
+  if (ext === 'svg' || ext === 'gif') return { blob: file, name: file.name, trimmed: false };
 
   let bitmap: ImageBitmap;
   try {
@@ -155,20 +242,33 @@ async function prepareImage(file: File, maxDim: number): Promise<{ blob: Blob; n
     throw new Error('فایل تصویر قابل خواندن نیست.');
   }
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
-  if (!isHeic && scale === 1 && file.size < 400 * 1024) {
+  if (!trim && !isHeic && scale === 1 && file.size < 400 * 1024) {
     bitmap.close();
-    return { blob: file, name: file.name };
+    return { blob: file, name: file.name, trimmed: false };
   }
-  const canvas = document.createElement('canvas');
+  let canvas = document.createElement('canvas');
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: trim })!;
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
+  let trimmed = false;
+  if (trim) {
+    const box = contentBox(ctx, canvas.width, canvas.height);
+    if (box) {
+      const cropped = document.createElement('canvas');
+      cropped.width = box.w;
+      cropped.height = box.h;
+      cropped.getContext('2d')!.drawImage(canvas, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+      canvas = cropped;
+      trimmed = true;
+    }
+  }
   const webp = await canvasToBlob(canvas, 'image/webp', 0.9);
-  if (webp && webp.type === 'image/webp') return { blob: webp, name: 'image.webp' };
+  if (webp && webp.type === 'image/webp') return { blob: webp, name: 'image.webp', trimmed };
   const png = await canvasToBlob(canvas, 'image/png', 1);
   if (!png) throw new Error('پردازش تصویر ناموفق بود.');
-  return { blob: png, name: 'image.png' };
+  return { blob: png, name: 'image.png', trimmed };
 }
 
 /** Grab a frame of a video in the browser to use as its poster (null if the browser can't decode it). */
@@ -208,7 +308,7 @@ export type UploadPhase = 'preparing' | 'uploading' | 'processing';
 export async function uploadFile(
   file: File,
   kind: UploadKind,
-  opts: { onProgress?: (pct: number) => void; onPhase?: (p: UploadPhase) => void; maxImageDim?: number } = {},
+  opts: { onProgress?: (pct: number) => void; onPhase?: (p: UploadPhase) => void; maxImageDim?: number; trim?: boolean } = {},
 ): Promise<UploadResult> {
   const rule = UPLOAD_RULES[kind];
   const ext = extOf(file.name);
@@ -218,10 +318,11 @@ export async function uploadFile(
     if (![...rule.exts, 'heic', 'heif'].includes(ext)) throw new Error(`فرمت تصویر مجاز نیست (${rule.exts.join('، ')}).`);
     if (mb(file.size) > 25) throw new Error('حجم تصویر بیش از ۲۵ مگابایت است.');
     opts.onPhase?.('preparing');
-    const { blob, name } = await prepareImage(file, opts.maxImageDim ?? 1600);
+    const { blob, name, trimmed } = await prepareImage(file, opts.maxImageDim ?? 1600, opts.trim);
     if (mb(blob.size) > rule.maxMb) throw new Error(`حجم تصویر بعد از فشرده‌سازی هم بیش از ${faNum(rule.maxMb)} مگابایت است.`);
     opts.onPhase?.('uploading');
-    return rawUpload(blob, name, kind, opts.onProgress);
+    const r = await rawUpload(blob, name, kind, opts.onProgress);
+    return { url: r.url, note: trimmed ? 'حاشیه‌های خالی اطراف تصویر به‌طور خودکار حذف شد.' : undefined };
   }
 
   if (!rule.exts.includes(ext)) throw new Error(`فرمت فایل مجاز نیست. فرمت‌های مجاز: ${rule.exts.join('، ')}`);
@@ -289,4 +390,16 @@ export function updateMyInvitation(id: string, patch: Partial<MyInvitation>) {
 
 export function forgetMyInvitation(id: string) {
   localStorage.setItem(MINE_KEY, JSON.stringify(getMyInvitations().filter(i => i.id !== id)));
+}
+
+/** Fire-and-forget visit statistics (guests only; never blocks the page). */
+export function trackEvent(slug: string, type: string) {
+  try {
+    const url = apiUrl(`invitations/${encodeURIComponent(slug)}/event`);
+    const body = JSON.stringify({ type });
+    if (navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) return;
+    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+  } catch {
+    /* ignore */
+  }
 }

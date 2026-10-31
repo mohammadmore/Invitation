@@ -1,4 +1,4 @@
-import { hasTimes, isShown, TIMEZONES, type InvitationConfig } from './invitation';
+import { hasTimes, isShown, localize, TIMEZONES, type InvitationConfig, type Lang } from './invitation';
 
 /** Offset (minutes) of `tz` from UTC at the given instant. */
 function tzOffsetMinutes(utcMs: number, tz: string): number {
@@ -78,14 +78,51 @@ export function eventEnded(c: InvitationConfig, now = Date.now()): boolean {
   return now > zonedToUtc(c.event.endDate, (useTimes(c) && c.event.endTime) || '23:59', c.event.timezone);
 }
 
-function eventDetailsText(c: InvitationConfig): string {
-  const lines = [`با افتخار منتظر حضور گرم شما در غرفه شرکت ${c.company.name} هستیم.`, '', `مکان: ${c.event.location}`];
-  if (c.event.booth && isShown(c, 'booth')) lines.push(c.event.booth);
-  if (c.event.timeLabel && isShown(c, 'time')) lines.push(c.event.timeLabel);
+/** English label such as "23–25 September 2026". */
+export function englishDateLabel(start: string, end: string): string {
+  if (!start) return '';
+  const fmt = (d: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', ...opts }).format(new Date(`${d}T12:00:00Z`));
+  if (!end || end === start) return fmt(start, { day: 'numeric', month: 'long', year: 'numeric' });
+  const [sy, sm] = start.split('-');
+  const [ey, em] = end.split('-');
+  if (sy !== ey) return `${fmt(start, { day: 'numeric', month: 'long', year: 'numeric' })} – ${fmt(end, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  if (sm !== em) return `${fmt(start, { day: 'numeric', month: 'long' })} – ${fmt(end, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  return `${fmt(start, { day: 'numeric' })}–${fmt(end, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+}
+
+/** English label such as "9:00 – 17:00 (Tehran time)". */
+export function englishTimeLabel(start: string, end: string, tz = 'Asia/Tehran'): string {
+  if (!start || !end) return '';
+  const city = tz.split('/').pop()!.replace(/_/g, ' ');
+  const t = (x: string) => x.replace(/^0(\d)/, '$1');
+  return `${t(start)} – ${t(end)} (${city} time)`;
+}
+
+/** Labels for the given language (English ones are generated when not overridden). */
+export function dateText(c: InvitationConfig, lang: Lang): string {
+  if (lang === 'en' && c.en.enabled) return c.en.dateLabel || englishDateLabel(c.event.startDate, c.event.endDate);
+  return c.event.dateLabel || jalaliRangeLabel(c.event.startDate, c.event.endDate);
+}
+export function timeText(c: InvitationConfig, lang: Lang): string {
+  if (lang === 'en' && c.en.enabled) return c.en.timeLabel || englishTimeLabel(c.event.startTime, c.event.endTime, c.event.timezone);
+  return c.event.timeLabel || timeRangeLabel(c.event.startTime, c.event.endTime, c.event.timezone);
+}
+
+function eventDetailsText(c: InvitationConfig, lang: Lang): string {
+  const l = localize(c, lang);
+  const en = lang === 'en' && c.en.enabled;
+  const lines = [en ? `We look forward to welcoming you at the ${l.company.name} booth.` : `با افتخار منتظر حضور گرم شما در غرفه شرکت ${l.company.name} هستیم.`, ''];
+  if (isShown(c, 'location')) lines.push(`${en ? 'Venue' : 'مکان'}: ${l.event.location}`);
+  if (l.event.booth && isShown(c, 'booth')) lines.push(l.event.booth);
+  const time = timeText(c, lang);
+  if (time && isShown(c, 'time')) lines.push(time);
   return lines.join('\n');
 }
 
-const summary = (c: InvitationConfig) => `بازدید از غرفه ${c.company.name} - ${c.event.title}`;
+const summary = (c: InvitationConfig, lang: Lang) => {
+  const l = localize(c, lang);
+  return lang === 'en' && c.en.enabled ? `Visit ${l.company.name} – ${l.event.title}` : `بازدید از غرفه ${l.company.name} - ${l.event.title}`;
+};
 
 /** Calendar entries use the daily opening hours when known; otherwise an all-day event. */
 const useTimes = (c: InvitationConfig) => hasTimes(c) && isShown(c, 'time');
@@ -103,8 +140,9 @@ function firstDay(c: InvitationConfig) {
   return { start: utcStamp(e.startDate, e.startTime, e.timezone), end: utcStamp(e.startDate, e.endTime, e.timezone), days: dayCount(e.startDate, e.endDate) };
 }
 
-export function googleCalendarUrl(c: InvitationConfig): string {
-  const params = new URLSearchParams({ action: 'TEMPLATE', text: summary(c), details: eventDetailsText(c), location: c.event.location, ctz: c.event.timezone });
+export function googleCalendarUrl(c: InvitationConfig, lang: Lang = 'fa'): string {
+  const loc = isShown(c, 'location') ? localize(c, lang).event.location : '';
+  const params = new URLSearchParams({ action: 'TEMPLATE', text: summary(c, lang), details: eventDetailsText(c, lang), location: loc, ctz: c.event.timezone });
   if (useTimes(c)) {
     const { start, end, days } = firstDay(c);
     params.set('dates', `${start}/${end}`);
@@ -137,7 +175,7 @@ function fold(line: string): string {
   return out.join('\r\n ');
 }
 
-export function icsContent(c: InvitationConfig): string {
+export function icsContent(c: InvitationConfig, lang: Lang = 'fa'): string {
   let timing: string[];
   if (useTimes(c)) {
     const { start, end, days } = firstDay(c);
@@ -155,12 +193,12 @@ export function icsContent(c: InvitationConfig): string {
     `UID:${c.slug || 'invite'}-${c.event.startDate}@expo-invite`,
     `DTSTAMP:${stamp(Date.now())}`,
     ...timing,
-    `SUMMARY:${icsEscape(summary(c))}`,
-    `DESCRIPTION:${icsEscape(eventDetailsText(c))}`,
-    `LOCATION:${icsEscape(c.event.location)}`,
+    `SUMMARY:${icsEscape(summary(c, lang))}`,
+    `DESCRIPTION:${icsEscape(eventDetailsText(c, lang))}`,
+    `LOCATION:${icsEscape(isShown(c, 'location') ? localize(c, lang).event.location : '')}`,
     'BEGIN:VALARM',
     'ACTION:DISPLAY',
-    `DESCRIPTION:${icsEscape(summary(c))}`,
+    `DESCRIPTION:${icsEscape(summary(c, lang))}`,
     'TRIGGER:-PT1H',
     'END:VALARM',
     'END:VEVENT',

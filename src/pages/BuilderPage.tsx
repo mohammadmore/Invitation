@@ -21,14 +21,16 @@ import {
   X,
   History,
   CircleCheck,
+  CopyPlus,
 } from 'lucide-react';
 import InvitationView from '../invitation/InvitationView';
-import { api, ApiError, editUrl, getAdminPassword, getMyInvitations, inviteUrl, saveMyInvitation, serverMeta, setAdminPassword, setEditAuth, updateMyInvitation, type RecordStatus } from '../lib/api';
+import { api, ApiError, editUrl, getAdminPassword, getMyInvitations, inviteUrl, saveMyInvitation, serverMeta, setAdminPassword, setEditAuth, updateMyInvitation, type Feedback, type RecordStatus, type RecordView } from '../lib/api';
 import { previewUrl, route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
-import { blankInvitation, ITEMS, sanitizeInvitation, validateForPublish, type InvitationConfig, type Issue } from '../shared/invitation';
+import { blankInvitation, ITEMS, sanitizeInvitation, STEP, validateForPublish, type CopyMode, type InvitationConfig, type Issue } from '../shared/invitation';
 import { ensureContrast } from '../shared/color';
-import { BasicsStep, BrandStep, EventStep, MediaStep, TextsStep, type SlugState, type Update } from '../builder/steps';
+import { BasicsStep, BrandStep, EnglishStep, EventStep, GuestsStep, MediaStep, TextsStep, type SlugState, type Update } from '../builder/steps';
+import { ConflictModal, DuplicateModal, FeedbackSection, HistoryModal, PersonalLinks, RsvpList, StatsSection } from '../builder/panels';
 import { Section } from '../builder/ui';
 
 const LOCAL_DRAFT_KEY = 'expo-invite-draft';
@@ -41,7 +43,9 @@ const STEPS = [
   { title: 'ویدئو و موزیک', preview: 1 },
   { title: 'متن‌ها', preview: 2 },
   { title: 'زمان و مکان', preview: 3 },
-  { title: 'انتشار', preview: 1 },
+  { title: 'نسخه انگلیسی', preview: 1 },
+  { title: 'مهمانان', preview: 3 },
+  { title: 'انتشار و گزارش', preview: 1 },
 ] as const;
 
 function loadLocalDraft(): InvitationConfig {
@@ -64,7 +68,20 @@ interface RecordInfo {
   publishedSlug: string;
   /** Known only in the browser that created it (or after an admin re-issues it) */
   editToken?: string;
+  /** Server revision this page is based on (edit-conflict detection) */
+  revision: number;
+  feedback: Feedback[];
 }
+
+const infoFrom = (r: RecordView, editToken?: string): RecordInfo => ({
+  id: r.id,
+  status: r.status,
+  previewToken: r.previewToken,
+  publishedSlug: r.publishedSlug,
+  editToken,
+  revision: r.revision,
+  feedback: r.feedback,
+});
 
 const STATUS_LABEL: Record<RecordStatus, string> = { draft: 'پیش‌نویس', published: 'منتشر شده', changed: 'منتشر شده — تغییرات منتشرنشده دارد' };
 
@@ -88,6 +105,9 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const [restorable, setRestorable] = useState<{ config: InvitationConfig; savedAt: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const stepperRef = useRef<HTMLOListElement>(null);
+  const [conflict, setConflict] = useState<RecordView | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const savedJson = useRef('');
   const saving = useRef<Promise<unknown> | null>(null);
 
@@ -120,7 +140,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
         const r = await api.getRecord(initialId);
         setConfig(r.draft);
         savedJson.current = JSON.stringify(r.draft);
-        setRecord({ id: r.id, status: r.status, previewToken: r.previewToken, publishedSlug: r.publishedSlug, editToken: token || undefined });
+        setRecord(infoFrom(r, token || undefined));
         setLastSaved(new Date(r.updatedAt));
         setSaveState('saved');
         try {
@@ -142,7 +162,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const dirty = loadState === 'ready' && JSON.stringify(config) !== savedJson.current;
 
   const save = useCallback(
-    async (cfg: InvitationConfig): Promise<RecordInfo | null> => {
+    async (cfg: InvitationConfig, force = false): Promise<RecordInfo | null> => {
       // Never run two saves at once (the first one may be creating the record).
       while (saving.current) await saving.current.catch(() => {});
       const job = (async () => {
@@ -153,7 +173,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
           let slugConflict = false;
           if (!record) {
             const r = await api.createRecord(cfg);
-            info = { id: r.id, status: r.status, previewToken: r.previewToken, publishedSlug: r.publishedSlug, editToken: r.editToken };
+            info = infoFrom(r, r.editToken);
             slugConflict = r.slugConflict;
             setEditAuth({ id: r.id, token: r.editToken });
             sessionStorage.setItem(tokenKey(r.id), r.editToken);
@@ -162,8 +182,8 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
             history.replaceState(null, '', route(`builder/${r.id}`));
             document.title = 'ویرایش دعوتنامه';
           } else {
-            const r = await api.saveRecord(record.id, cfg);
-            info = { ...record, status: r.status, publishedSlug: r.publishedSlug };
+            const r = await api.saveRecord(record.id, cfg, record.revision, force);
+            info = infoFrom(r, record.editToken);
             slugConflict = r.slugConflict;
             updateMyInvitation(record.id, { slug: r.slug, company: cfg.company.name, event: cfg.event.title });
             localStorage.removeItem(localEditKey(record.id));
@@ -177,8 +197,10 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
           setSaveState('saved');
           return info;
         } catch (e) {
+          const err = e as ApiError;
+          if (err.conflictRecord) setConflict(err.conflictRecord); // someone else saved meanwhile
           setSaveState('error');
-          setSaveError((e as Error).message);
+          setSaveError(err.conflictRecord ? 'تغییر هم‌زمان در جای دیگر' : err.message);
           return null;
         }
       })();
@@ -203,10 +225,38 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
       /* storage full / private mode */
     }
     const worthSaving = record || config.company.name.trim() || config.event.title.trim();
-    if (!worthSaving) return;
+    if (!worthSaving || conflict) return;
     const t = window.setTimeout(() => save(config), 1500);
     return () => window.clearTimeout(t);
-  }, [config, dirty, record, save]);
+  }, [config, dirty, record, save, conflict]);
+
+  /** Load a server version into the page (after a conflict, a restore, …). */
+  const adopt = useCallback((r: RecordView) => {
+    setConfig(r.draft);
+    savedJson.current = JSON.stringify(r.draft);
+    setRecord(prev => infoFrom(r, prev?.editToken));
+    setLastSaved(new Date(r.updatedAt));
+    setSaveState('saved');
+    setConflict(null);
+  }, []);
+
+  // Coming back to this tab: pick up changes made elsewhere (or flag a conflict if we have unsaved edits).
+  useEffect(() => {
+    if (!record) return;
+    const check = async () => {
+      if (document.hidden || saving.current) return;
+      const r = await api.getRecord(record.id).catch(() => null);
+      if (!r || r.revision === record.revision) return;
+      if (JSON.stringify(config) === savedJson.current) adopt(r);
+      else setConflict(r);
+    };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [record, config, adopt]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -238,7 +288,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   // ---------- completeness (informative while editing, blocking only at publish) ----------
   const allIssues = useMemo<Issue[]>(() => {
     const list = validateForPublish(config);
-    if (slugState === 'taken' && !record?.publishedSlug) list.unshift({ field: 'slug', step: 0, message: 'این آدرس لینک متعلق به دعوتنامه دیگری است.' });
+    if (slugState === 'taken' && !record?.publishedSlug) list.unshift({ field: 'slug', step: STEP.basics, message: 'این آدرس لینک متعلق به دعوتنامه دیگری است.' });
     return list;
   }, [config, slugState, record?.publishedSlug]);
   const issuesOf = (s: number) => allIssues.filter(i => i.step === s);
@@ -262,16 +312,17 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
     try {
       const info = record ?? (await save(config));
       if (!info) throw new Error(saveError || 'ذخیره ناموفق بود.');
-      const r = await api.publish(info.id, config);
+      const r = await api.publish(info.id, config, info.revision);
       savedJson.current = JSON.stringify(config);
       localStorage.removeItem(localEditKey(info.id));
       updateMyInvitation(info.id, { slug: r.slug });
-      setRecord({ ...info, status: r.status, publishedSlug: r.publishedSlug });
+      setRecord(infoFrom(r, info.editToken));
       setSaveState('saved');
       setLastSaved(new Date());
       setJustPublished(true);
     } catch (e) {
       const err = e as ApiError;
+      if (err.conflictRecord) setConflict(err.conflictRecord);
       setRevealErrors(true);
       setPublishError(err.message);
       if (err.field === 'slug') setSlugState('taken');
@@ -284,11 +335,18 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
     if (!record || !confirm('دعوتنامه از دسترس مهمانان خارج شود؟ آدرس لینک برای همین دعوتنامه رزرو می‌ماند و می‌توانید دوباره منتشرش کنید.')) return;
     try {
       const r = await api.unpublish(record.id);
-      setRecord({ ...record, status: r.status, publishedSlug: '' });
+      setRecord(infoFrom(r, record.editToken));
       setJustPublished(false);
     } catch (e) {
       alert((e as Error).message);
     }
+  }
+
+  async function duplicate(mode: CopyMode) {
+    if (dirty) await save(config);
+    const r = await api.duplicate(record!.id, mode);
+    saveMyInvitation({ id: r.id, editToken: r.editToken, slug: '', company: r.company, event: r.event, createdAt: new Date().toISOString() });
+    window.location.href = editUrl(r.id, r.editToken);
   }
 
   const resetAll = () => {
@@ -315,7 +373,8 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const slugLocked = !!record?.publishedSlug;
   const stepProps = { config, update, slugLocked, recordId: record?.id, issues: revealErrors ? allIssues : [], previewAt, canEditFooter };
   const shareUrl = config.slug ? inviteUrl(config.slug) : undefined;
-  const stepPending = step < 5 ? issuesOf(step) : [];
+  const stepPending = step < STEP.publish ? issuesOf(step) : [];
+  const previewLang = step === STEP.english && config.en.enabled ? 'en' : 'fa';
 
   return (
     <div className="min-h-[100dvh] bg-slate-100 text-slate-900">
@@ -331,6 +390,16 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
           </div>
           <div className="flex-1" />
           <SaveIndicator state={saveState} error={saveError} lastSaved={lastSaved} onSave={() => save(config)} />
+          {record && (
+            <>
+              <button onClick={() => setHistoryOpen(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600" title="تاریخچه تغییرات">
+                <History className="w-5 h-5" />
+              </button>
+              <button onClick={() => setCopyOpen(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
+                <CopyPlus className="w-5 h-5" />
+              </button>
+            </>
+          )}
           {!record && (
             <div className="relative">
               <button onClick={() => setMenuOpen(o => !o)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600" aria-label="گزینه‌ها">
@@ -350,7 +419,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
         <nav className="max-w-7xl mx-auto px-4 pb-3 overflow-x-auto [scrollbar-width:none]">
           <ol ref={stepperRef} className="flex items-center gap-1 min-w-max">
             {STEPS.map((s, i) => {
-              const open = i < 5 ? issuesOf(i).length : 0;
+              const open = i < STEP.publish ? issuesOf(i).length : 0;
               const bad = open > 0 && revealErrors;
               return (
                 <li key={s.title} className="flex items-center gap-1">
@@ -407,7 +476,15 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
           {step === 2 && <MediaStep {...stepProps} />}
           {step === 3 && <TextsStep {...stepProps} />}
           {step === 4 && <EventStep {...stepProps} />}
-          {step === 5 && (
+          {step === STEP.english && <EnglishStep {...stepProps} />}
+          {step === STEP.guests && (
+            <>
+              <GuestsStep {...stepProps} />
+              <PersonalLinks baseUrl={config.slug ? inviteUrl(record?.publishedSlug || config.slug) : ''} published={!!record?.publishedSlug} />
+              {record && config.rsvp.enabled && <RsvpList id={record.id} slug={config.slug} />}
+            </>
+          )}
+          {step === STEP.publish && (
             <PublishStep
               config={config}
               record={record}
@@ -421,6 +498,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
               onSaveForPreview={() => save(config)}
               onHide={key => update('hidden', { [key]: true })}
               goStep={goStep}
+              onFeedbackChange={feedback => setRecord(r => (r ? { ...r, feedback } : r))}
             />
           )}
 
@@ -462,7 +540,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
         <aside className="hidden md:block">
           <div className="sticky top-32">
             <PhoneFrame>
-              <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} />
+              <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} />
             </PhoneFrame>
             <p className="text-center text-xs text-slate-500 mt-3">پیش‌نمایش زنده — موارد ناقص با کادر قرمز مشخص شده‌اند</p>
           </div>
@@ -471,12 +549,26 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
 
       {showPreview && (
         <div className="fixed inset-0 z-50 bg-slate-950 md:hidden">
-          <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} />
+          <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} />
           <button onClick={() => setShowPreview(false)} className="absolute top-4 right-4 z-[200] inline-flex items-center gap-1.5 bg-white text-slate-900 rounded-full pl-4 pr-3 py-2 shadow-xl text-sm font-bold" aria-label="بستن پیش‌نمایش">
             <X className="w-5 h-5" /> بازگشت به ویرایش
           </button>
         </div>
       )}
+
+      {conflict && (
+        <ConflictModal
+          server={conflict}
+          onLoadServer={() => adopt(conflict)}
+          onOverwrite={() => {
+            setRecord(r => (r ? { ...r, revision: conflict.revision } : r));
+            setConflict(null);
+            save(config, true);
+          }}
+        />
+      )}
+      {historyOpen && record && <HistoryModal id={record.id} hasPublished={!!record.publishedSlug} onClose={() => setHistoryOpen(false)} onRestored={adopt} />}
+      {copyOpen && record && <DuplicateModal onClose={() => setCopyOpen(false)} onCopy={duplicate} />}
     </div>
   );
 }
@@ -620,6 +712,7 @@ function PublishStep({
   onSaveForPreview,
   onHide,
   goStep,
+  onFeedbackChange,
 }: {
   config: InvitationConfig;
   record: RecordInfo | null;
@@ -633,6 +726,7 @@ function PublishStep({
   onSaveForPreview: () => Promise<RecordInfo | null>;
   onHide: (key: NonNullable<Issue['item']>) => void;
   goStep: (i: number) => void;
+  onFeedbackChange: (f: Feedback[]) => void;
 }) {
   const [qr, setQr] = useState('');
   const liveSlug = record?.publishedSlug || '';
@@ -682,6 +776,8 @@ function PublishStep({
           </button>
         )}
       </Section>
+
+      {record && <FeedbackSection id={record.id} feedback={record.feedback} revision={record.revision} onChange={onFeedbackChange} />}
 
       {liveSlug && (
         <Section title={justPublished ? 'دعوتنامه منتشر شد 🎉' : 'لینک مهمانان'} description="این لینک را برای مهمانان ارسال کنید یا کد QR را روی کارت‌های چاپی قرار دهید.">
@@ -806,6 +902,7 @@ function PublishStep({
           </button>
         </Section>
       )}
+      {record?.publishedSlug && <StatsSection id={record.id} />}
     </>
   );
 }
