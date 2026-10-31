@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { adminPalette } from '../shared/color';
 
@@ -28,8 +29,34 @@ export function setModePref(p: ModePref) {
   } catch {
     /* private mode: still applies for this page */
   }
-  current = p;
-  listeners.forEach(l => l());
+  fade(() => {
+    current = p;
+    notify();
+  });
+}
+
+const notify = () => listeners.forEach(l => l());
+
+/**
+ * Runs a light/dark switch as a soft crossfade instead of a hard cut.
+ * View Transitions (Chrome/Edge/Safari 18+) fade a snapshot of the whole page, gradients
+ * included; elsewhere colours transition briefly. Skipped for "reduce motion" users.
+ */
+function fade(update: () => void) {
+  const html = document.documentElement;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return update();
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
+  if (doc.startViewTransition) {
+    try {
+      doc.startViewTransition(() => flushSync(update));
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  html.classList.add('mode-fade');
+  update();
+  window.setTimeout(() => html.classList.remove('mode-fade'), 600);
 }
 
 let current: ModePref = typeof window !== 'undefined' ? readPref() : 'system';
@@ -43,13 +70,14 @@ function subscribe(l: () => void) {
     }
   };
   window.addEventListener('storage', onStorage); // other tabs
-  media?.addEventListener?.('change', l); // OS switches light/dark
   return () => {
     listeners.delete(l);
     window.removeEventListener('storage', onStorage);
-    media?.removeEventListener?.('change', l);
   };
 }
+
+// OS switches light/dark (only matters in automatic mode): same soft fade
+media?.addEventListener?.('change', () => (current === 'system' ? fade(notify) : notify()));
 
 const snapshot = () => `${current}:${media?.matches ? 'dark' : 'light'}`;
 

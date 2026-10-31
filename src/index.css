@@ -41,6 +41,19 @@ body {
   .animate-gradient-btn { animation: none; }
 }
 
+/* Soft light/dark switch (see fade() in src/lib/adminTheme.tsx) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.45s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+.mode-fade,
+.mode-fade *,
+.mode-fade *::before,
+.mode-fade *::after {
+  transition: background-color 0.45s ease, color 0.45s ease, border-color 0.45s ease, fill 0.45s ease, stroke 0.45s ease, box-shadow 0.45s ease !important;
+}
+
 /* ---------------------------------------------------------------- Admin: glassmorphism
    Colours come from adminPalette() (src/shared/color.ts): the studio's violet/blue/pink,
    or an invitation's own palette on its builder, dashboard and report pages. */
