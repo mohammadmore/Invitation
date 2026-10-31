@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --ignore ./data --ignore ./src server/index.ts",
-    "build": "vite build && esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/server.js",
-    "start": "NODE_ENV=production node dist-server/server.js",
-    "clean": "rm -rf dist dist-server",
+    "build": "vite build && esbuild server/index.ts --bundle --platform=node --format=cjs --target=node18 --external:vite --outfile=dist-server/server.cjs",
+    "start": "NODE_ENV=production node dist-server/server.cjs",
+    "release": "npm run build && node scripts/release.mjs",
+    "clean": "rm -rf dist dist-server release",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,16 +23,20 @@
     "@fontsource/vazirmatn": "^5.3.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "compression": "^1.8.2",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "framer-motion": "^13.1.0",
+    "jalaali-js": "^2.0.1",
     "lucide-react": "^1.31.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"
   },
   "devDependencies": {
+    "@types/compression": "^1.8.1",
     "@types/express": "^4.17.21",
+    "@types/jalaali-js": "^1.2.0",
     "@types/node": "^22.14.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
@@ -42,5 +47,8 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

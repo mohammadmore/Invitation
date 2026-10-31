@@ -1,10 +1,11 @@
 node_modules/
 build/
 dist/
+dist-server/
+release/
+data/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
-dist-server/
-data/

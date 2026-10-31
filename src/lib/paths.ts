@@ -1,0 +1,23 @@
+// The app is served under a base path (default "/in/", e.g. https://studio.asvashop.com/in/).
+// Vite exposes it as import.meta.env.BASE_URL (always with a trailing slash).
+
+export const BASE: string = import.meta.env.BASE_URL || '/';
+
+/** Resolve a stored, base-relative asset path ("uploads/x.webp", "bg.mp4") to a URL. */
+export const asset = (p: string) => (p ? BASE + p.replace(/^\/+/, '') : '');
+
+/** App-internal link, e.g. route('builder') -> "/in/builder". */
+export const route = (p = '') => BASE + p.replace(/^\/+/, '');
+
+export const apiUrl = (p: string) => route(`api/${p.replace(/^\/+/, '')}`);
+
+/** Current path relative to the base, without leading/trailing slashes. */
+export function appPath(): string {
+  let p = window.location.pathname;
+  const base = BASE.replace(/\/$/, '');
+  if (base && p.startsWith(base)) p = p.slice(base.length);
+  return p.replace(/^\/+|\/+$/g, '');
+}
+
+export const inviteUrl = (slug: string) => `${window.location.origin}${route(slug)}`;
+export const editUrl = (slug: string, token: string) => `${window.location.origin}${route(`builder/${slug}`)}#${token}`;

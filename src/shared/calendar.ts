@@ -1,26 +1,51 @@
-import type { InvitationConfig } from './invitation';
+import { TIMEZONES, type InvitationConfig } from './invitation';
 
-// Iran has had no daylight saving since 2022, so Tehran is a fixed UTC+03:30.
-const TEHRAN_OFFSET_MIN = 210;
+/** Offset (minutes) of `tz` from UTC at the given instant. */
+function tzOffsetMinutes(utcMs: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const get = (t: string) => Number(parts.find(p => p.type === t)?.value);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'));
+  return Math.round((asUtc - utcMs) / 60_000);
+}
 
-/** "2026-09-23" + "09:00" (Tehran) -> "20260923T053000Z" */
-export function tehranToUtcStamp(date: string, time: string): string {
+/** Wall-clock date+time in `tz` -> UTC epoch ms (handles DST). */
+export function zonedToUtc(date: string, time: string, tz: string): number {
   const [y, m, d] = date.split('-').map(Number);
   const [hh, mm] = time.split(':').map(Number);
-  const utc = new Date(Date.UTC(y, m - 1, d, hh, mm) - TEHRAN_OFFSET_MIN * 60_000);
-  return utc.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const guess = Date.UTC(y, m - 1, d, hh, mm);
+  let utc = guess - tzOffsetMinutes(guess, tz) * 60_000;
+  utc = guess - tzOffsetMinutes(utc, tz) * 60_000;
+  return utc;
+}
+
+const stamp = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+
+export function utcStamp(date: string, time: string, tz: string): string {
+  return stamp(zonedToUtc(date, time, tz));
+}
+
+/** Number of exhibition days (inclusive). */
+export function dayCount(start: string, end: string): number {
+  if (!start || !end) return 1;
+  const ms = Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`);
+  return Math.max(1, Math.round(ms / 86_400_000) + 1);
 }
 
 const faDigits = (n: number | string) => String(n).replace(/\d/g, x => '۰۱۲۳۴۵۶۷۸۹'[+x]);
 
 function jalaliParts(date: string) {
   const [y, m, d] = date.split('-').map(Number);
-  const parts = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
-    timeZone: 'UTC',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).formatToParts(new Date(Date.UTC(y, m - 1, d, 12)));
+  const parts = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).formatToParts(
+    new Date(Date.UTC(y, m - 1, d, 12)),
+  );
   const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
   return { day: get('day'), month: get('month'), year: get('year').replace(/\s*ه\.ش\.?/, '') };
 }
@@ -36,33 +61,48 @@ export function jalaliRangeLabel(start: string, end: string): string {
   return `${s.day} تا ${e.day} ${s.month} ماه ${s.year}`;
 }
 
-/** Persian label such as "ساعت ۹ الی ۱۷". */
-export function timeRangeLabel(start: string, end: string): string {
+/** Persian label such as "ساعت ۹ الی ۱۷" (+ zone name when not Tehran). */
+export function timeRangeLabel(start: string, end: string, tz = 'Asia/Tehran'): string {
   const fmt = (t: string) => {
     const [h, m] = t.split(':').map(Number);
     return m ? `${faDigits(h)}:${faDigits(String(m).padStart(2, '0'))}` : faDigits(h);
   };
-  return `ساعت ${fmt(start)} الی ${fmt(end)}`;
+  const zone = tz !== 'Asia/Tehran' ? ` (به وقت ${TIMEZONES.find(z => z.id === tz)?.label ?? tz})` : '';
+  return `ساعت ${fmt(start)} الی ${fmt(end)}${zone}`;
+}
+
+/** True once the last exhibition day has closed in the venue's time zone. */
+export function eventEnded(c: InvitationConfig, now = Date.now()): boolean {
+  if (!c.event.endDate) return false;
+  return now > zonedToUtc(c.event.endDate, c.event.endTime || '23:59', c.event.timezone);
 }
 
 function eventDetailsText(c: InvitationConfig): string {
-  return [`با افتخار منتظر حضور گرم شما در غرفه شرکت ${c.company.name} هستیم.`, '', `مکان: ${c.event.location}`, c.event.booth]
-    .filter((l, i) => l || i === 1)
-    .join('\n');
+  const lines = [`با افتخار منتظر حضور گرم شما در غرفه شرکت ${c.company.name} هستیم.`, '', `مکان: ${c.event.location}`];
+  if (c.event.booth) lines.push(c.event.booth);
+  if (c.event.timeLabel) lines.push(c.event.timeLabel);
+  return lines.join('\n');
 }
 
 const summary = (c: InvitationConfig) => `بازدید از غرفه ${c.company.name} - ${c.event.title}`;
 
+/** First day's opening hours; multi-day exhibitions repeat daily (not one 56-hour block). */
+function firstDay(c: InvitationConfig) {
+  const e = c.event;
+  return { start: utcStamp(e.startDate, e.startTime, e.timezone), end: utcStamp(e.startDate, e.endTime, e.timezone), days: dayCount(e.startDate, e.endDate) };
+}
+
 export function googleCalendarUrl(c: InvitationConfig): string {
-  const dates = `${tehranToUtcStamp(c.event.startDate, c.event.startTime)}/${tehranToUtcStamp(c.event.endDate, c.event.endTime)}`;
+  const { start, end, days } = firstDay(c);
   const params = new URLSearchParams({
     action: 'TEMPLATE',
     text: summary(c),
-    dates,
+    dates: `${start}/${end}`,
     details: eventDetailsText(c),
     location: c.event.location,
-    ctz: 'Asia/Tehran',
+    ctz: c.event.timezone,
   });
+  if (days > 1) params.set('recur', `RRULE:FREQ=DAILY;COUNT=${days}`);
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
@@ -89,21 +129,27 @@ function fold(line: string): string {
 }
 
 export function icsContent(c: InvitationConfig): string {
-  const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const { start, end, days } = firstDay(c);
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//ExpoInvite//Invite//FA',
+    'PRODID:-//AsvaStudio//ExpoInvite//FA',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
     `UID:${c.slug || 'invite'}-${c.event.startDate}@expo-invite`,
-    `DTSTAMP:${now}`,
-    `DTSTART:${tehranToUtcStamp(c.event.startDate, c.event.startTime)}`,
-    `DTEND:${tehranToUtcStamp(c.event.endDate, c.event.endTime)}`,
+    `DTSTAMP:${stamp(Date.now())}`,
+    `DTSTART:${start}`,
+    `DTEND:${end}`,
+    ...(days > 1 ? [`RRULE:FREQ=DAILY;COUNT=${days}`] : []),
     `SUMMARY:${icsEscape(summary(c))}`,
     `DESCRIPTION:${icsEscape(eventDetailsText(c))}`,
     `LOCATION:${icsEscape(c.event.location)}`,
+    'BEGIN:VALARM',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:${icsEscape(summary(c))}`,
+    'TRIGGER:-PT1H',
+    'END:VALARM',
     'END:VEVENT',
     'END:VCALENDAR',
   ];

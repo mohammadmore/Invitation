@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy } from 'lucide-react';
+import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy, ExternalLink, CalendarX } from 'lucide-react';
 import { CUSTOM_FONT, fillPlaceholders, safeUrl, type InvitationConfig } from '../shared/invitation';
-import { googleCalendarUrl, icsContent } from '../shared/calendar';
+import { eventEnded, googleCalendarUrl, icsContent } from '../shared/calendar';
+import { themeColors } from '../shared/color';
+import { apiUrl, asset } from '../lib/paths';
 
 const InstagramIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -22,18 +24,27 @@ const AppleIcon = () => (
 );
 
 const IN_APP_RE = /Instagram|Telegram|Snapchat|WhatsApp|FBAV|FBAN|Line\/|Twitter|LinkedIn/i;
+/** Browser activation events (touchstart is *not* one on iOS). */
+const GESTURE_EVENTS = ['pointerup', 'touchend', 'click', 'keydown'] as const;
 
 function mediaType(url: string): string | undefined {
   const ext = url.split('.').pop()?.toLowerCase();
-  return ({ mp4: 'video/mp4', webm: 'video/webm', mov: 'video/mp4' } as Record<string, string>)[ext ?? ''];
+  return ({ mp4: 'video/mp4', webm: 'video/webm' } as Record<string, string>)[ext ?? ''];
 }
+
+/** iOS ignores HTMLMediaElement.volume; detect that so we can use a Web Audio gain node instead. */
+const volumeSettable = (() => {
+  if (typeof document === 'undefined') return true;
+  const a = document.createElement('audio');
+  a.volume = 0.5;
+  return a.volume === 0.5;
+})();
 
 async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    // Fallback for insecure contexts / old in-app browsers
     const ta = document.createElement('textarea');
     ta.value = text;
     ta.style.position = 'fixed';
@@ -46,53 +57,77 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
+const hideOnError = (e: React.SyntheticEvent<HTMLImageElement>) => (e.currentTarget.style.visibility = 'hidden');
+
 export interface InvitationViewProps {
   config: InvitationConfig;
   /** Rendered inside the wizard preview: no autoplay, no history, contained positioning. */
   embedded?: boolean;
-  /** When this changes, jump to the given step (used by the wizard to follow the edited section). */
-  focusStep?: number;
+  /** Jump to `step` whenever `key` changes (used by the wizard to follow the edited field). */
+  focus?: { step: number; key: number };
   /** Absolute URL that should be shared (defaults to the current page). */
   shareUrl?: string;
 }
 
-export default function InvitationView({ config, embedded = false, focusStep, shareUrl }: InvitationViewProps) {
+export default function InvitationView({ config, embedded = false, focus, shareUrl }: InvitationViewProps) {
   const { company, event, texts, theme, media, footer } = config;
   const hasMap = !!safeUrl(event.boothMapUrl);
   const [step, setStep] = useState(1);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
-  const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapState, setMapState] = useState<'loading' | 'loaded' | 'slow'>('loading');
   const [toast, setToast] = useState('');
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const userMutedRef = useRef(false);
+  const graphRef = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null);
+  const depthRef = useRef(0);
+  const toastTimer = useRef<number | undefined>(undefined);
   const isInApp = useMemo(() => !embedded && typeof navigator !== 'undefined' && IN_APP_RE.test(navigator.userAgent), [embedded]);
+  const ended = useMemo(() => eventEnded(config), [config]);
 
-  // ---------- navigation (with browser back-button support) ----------
+  // ---------- navigation (browser back button walks back through the steps) ----------
   const goTo = useCallback(
     (next: number) => {
       setStep(next);
-      if (!embedded) window.history.pushState({ inviteStep: next }, '');
+      if (!embedded) {
+        depthRef.current += 1;
+        window.history.pushState({ inviteStep: next, depth: depthRef.current }, '');
+      }
+    },
+    [embedded],
+  );
+
+  /** In-page "back" buttons: pop history instead of pushing, so the phone's Back button stays consistent. */
+  const goBack = useCallback(
+    (target: number) => {
+      if (!embedded && depthRef.current > 0) window.history.back();
+      else setStep(target);
     },
     [embedded],
   );
 
   useEffect(() => {
     if (embedded) return;
-    window.history.replaceState({ inviteStep: 1 }, '');
-    const onPop = (e: PopStateEvent) => setStep(typeof e.state?.inviteStep === 'number' ? e.state.inviteStep : 1);
+    window.history.replaceState({ inviteStep: 1, depth: 0 }, '');
+    const onPop = (e: PopStateEvent) => {
+      depthRef.current = typeof e.state?.depth === 'number' ? e.state.depth : 0;
+      setStep(typeof e.state?.inviteStep === 'number' ? e.state.inviteStep : 1);
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, [embedded]);
 
   useEffect(() => {
-    if (focusStep) setStep(focusStep === 4 && !hasMap ? 3 : focusStep);
-  }, [focusStep, hasMap]);
+    if (focus) setStep(focus.step === 4 && !hasMap ? 3 : focus.step);
+  }, [focus?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (step === 4 && !hasMap) setStep(3);
-    if (step !== 4) setMapLoaded(false);
+    if (step !== 4) return;
+    setMapState('loading');
+    const t = window.setTimeout(() => setMapState(s => (s === 'loading' ? 'slow' : s)), 10_000);
+    return () => window.clearTimeout(t);
   }, [step, hasMap]);
 
   // ---------- background video: pause behind the map to free the GPU ----------
@@ -106,21 +141,47 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
   useEffect(() => setIsVideoLoaded(false), [media.video]);
 
   // ---------- background music ----------
-  useEffect(() => {
+  const volume = media.musicVolume / 100;
+
+  const startAudio = useCallback(() => {
     const audio = audioRef.current;
-    if (audio) audio.volume = media.musicVolume / 100;
-  }, [media.musicVolume, media.music]);
+    if (!audio) return Promise.reject();
+    // Inside a user gesture: on iOS route through a gain node so the volume setting works.
+    if (!volumeSettable && !graphRef.current) {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (Ctx) {
+        const ctx: AudioContext = new Ctx();
+        const gain = ctx.createGain();
+        gain.gain.value = volume;
+        ctx.createMediaElementSource(audio).connect(gain).connect(ctx.destination);
+        graphRef.current = { ctx, gain };
+      }
+    }
+    graphRef.current?.ctx.resume().catch(() => {});
+    return audio.play();
+  }, [volume]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (embedded || !audio || !media.music) return;
-    const events = ['click', 'touchstart', 'keydown'] as const;
-    const removeListeners = () => events.forEach(e => document.removeEventListener(e, tryPlay));
+    if (graphRef.current) graphRef.current.gain.gain.value = volume;
+    else if (audio) audio.volume = volume;
+  }, [volume, media.music]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !media.music) return;
+    const cleanupGraph = () => {
+      graphRef.current?.ctx.close().catch(() => {});
+      graphRef.current = null;
+    };
+    if (embedded) return cleanupGraph;
+
+    const removeListeners = () => GESTURE_EVENTS.forEach(e => document.removeEventListener(e, tryPlay, true));
     function tryPlay() {
       if (userMutedRef.current) return removeListeners();
-      audio!.play().then(removeListeners).catch(() => {});
+      startAudio().then(removeListeners).catch(() => {});
     }
-    audio.play().catch(() => events.forEach(e => document.addEventListener(e, tryPlay, { passive: true })));
+    audio.play().catch(() => GESTURE_EVENTS.forEach(e => document.addEventListener(e, tryPlay, { capture: true, passive: true })));
 
     // Don't keep playing while the tab/app is in the background.
     let resumeOnVisible = false;
@@ -137,15 +198,18 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
       removeListeners();
       document.removeEventListener('visibilitychange', onVisibility);
       audio.pause();
+      cleanupGraph();
     };
-  }, [embedded, media.music]);
+  }, [embedded, media.music]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Note: while autoplay is blocked the document-level gesture listener (capture phase) also
+  // starts playback on this click; both paths "play", so the result is consistent.
   const toggleMusic = () => {
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
       userMutedRef.current = false;
-      audio.play().catch(() => {});
+      startAudio().catch(() => {});
     } else {
       userMutedRef.current = true;
       audio.pause();
@@ -155,17 +219,20 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
   const enter = () => {
     goTo(2);
     const audio = audioRef.current;
-    if (!embedded && audio && audio.paused && !userMutedRef.current) audio.play().catch(() => {});
+    if (!embedded && audio && audio.paused && !userMutedRef.current) startAudio().catch(() => {});
   };
 
   // ---------- share / calendar ----------
   const showToast = (msg: string) => {
+    window.clearTimeout(toastTimer.current);
     setToast(msg);
-    window.setTimeout(() => setToast(''), 2500);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2500);
   };
 
+  const pageUrl = () => shareUrl || window.location.href.split('#')[0];
+
   const handleShare = async () => {
-    const url = shareUrl || window.location.href;
+    const url = pageUrl();
     const text =
       fillPlaceholders(texts.shareText, config) ||
       `دعوتنامه ${event.title}\nزمان: ${event.dateLabel}\nمکان: ${event.location}${event.booth ? `\n${event.booth}` : ''}`;
@@ -180,19 +247,27 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
     showToast((await copyText(url)) ? 'لینک دعوتنامه کپی شد' : 'مرورگر شما از این قابلیت پشتیبانی نمی‌کند');
   };
 
-  const calendarReady = !!(event.startDate && event.endDate);
+  const calendarReady = !!(event.startDate && event.endDate) && event.endTime > event.startTime && !ended;
   const gcalUrl = useMemo(() => (calendarReady ? googleCalendarUrl(config) : '#'), [config, calendarReady]);
-  const icsUrl = useMemo(
-    () => (calendarReady ? `data:text/calendar;charset=utf-8,${encodeURIComponent(icsContent(config))}` : '#'),
-    [config, calendarReady],
-  );
+  // Published invitations get a real .ics from the server (much more reliable on iOS / in-app browsers).
+  const icsUrl = useMemo(() => {
+    if (!calendarReady) return '#';
+    if (!embedded && config.slug) return apiUrl(`invitations/${config.slug}/ics`);
+    return `data:text/calendar;charset=utf-8,${encodeURIComponent(icsContent(config))}`;
+  }, [config, calendarReady, embedded]);
 
   // ---------- theming ----------
+  const colors = useMemo(() => themeColors(theme), [theme]);
   const fontFamily = theme.font === CUSTOM_FONT ? 'InviteCustomFont' : theme.font;
   const themeStyle = {
-    '--c-primary': theme.primary,
-    '--c-accent': theme.accent,
-    '--c-bg': theme.background,
+    '--c-primary': colors.primary,
+    '--c-accent': colors.accent,
+    '--c-bg': colors.background,
+    '--c-fg': colors.fg,
+    '--c-primary-ink': colors.primaryInk,
+    '--c-accent-ink': colors.accentInk,
+    '--c-btn-primary': colors.btnPrimary,
+    '--c-btn-accent': colors.btnAccent,
     fontFamily: `'${fontFamily}', 'Vazirmatn', Tahoma, sans-serif`,
   } as React.CSSProperties;
 
@@ -201,9 +276,28 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
     .map(p => p.trim())
     .filter(Boolean);
   const mapUrl = safeUrl(event.mapUrl);
+  const boothMapUrl = safeUrl(event.boothMapUrl);
   const footerUrl = safeUrl(footer.url);
   const spring = { duration: 0.8, type: 'spring' as const, bounce: 0.4 };
   const btnPrimary = 'animate-gradient-btn hover:scale-[1.02] hover:shadow-[0_10px_25px_rgba(0,0,0,0.35)]';
+  const poster = asset(media.videoPoster);
+
+  const locationInner = (
+    <>
+      <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) group-hover:bg-(--c-accent)/20 transition-colors shrink-0">
+        <MapPin className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
+      </div>
+      <div className="flex flex-col min-w-0">
+        <span className="font-bold text-base @2xl:text-lg leading-tight break-words">{event.location || 'محل برگزاری'}</span>
+        {mapUrl && (
+          <span className="text-xs @2xl:text-sm text-(--c-accent-ink) font-bold mt-1 opacity-80 group-hover:opacity-100 flex items-center gap-1">
+            <Map className="w-3.5 h-3.5 @2xl:w-4 @2xl:h-4" />
+            برای مسیریابی روی نقشه کلیک کنید
+          </span>
+        )}
+      </div>
+    </>
+  );
 
   const mapOverlay = step === 4 && hasMap && (
     <motion.div
@@ -216,19 +310,35 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
       className={`${embedded ? 'absolute' : 'fixed'} inset-0 z-[100] w-full h-full bg-(--c-bg)`}
     >
       <button
-        onClick={() => (embedded ? setStep(3) : window.history.back())}
+        onClick={() => goBack(3)}
         aria-label="بازگشت"
         className="absolute top-20 left-6 z-[110] bg-white/30 hover:bg-white/50 backdrop-blur-md p-3 rounded-full text-slate-800 transition-all shadow-md border border-white/40 flex items-center justify-center"
       >
         <ChevronRight className="w-5 h-5" />
       </button>
-      {!mapLoaded && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-(--c-accent)">
-          <div className="w-10 h-10 border-4 border-slate-700 border-t-(--c-accent) rounded-full animate-spin mb-4" />
-          <span className="font-bold">در حال بارگذاری نقشه...</span>
+      {mapState !== 'loaded' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-(--c-fg) px-8 text-center">
+          {mapState === 'loading' ? (
+            <>
+              <div className="w-10 h-10 border-4 border-slate-500/40 border-t-(--c-accent) rounded-full animate-spin" />
+              <span className="font-bold">در حال بارگذاری نقشه...</span>
+            </>
+          ) : (
+            <span className="font-bold leading-relaxed">بارگذاری نقشه طول کشیده است. می‌توانید آن را در صفحه جدید باز کنید.</span>
+          )}
         </div>
       )}
-      <iframe src={safeUrl(event.boothMapUrl)} onLoad={() => setMapLoaded(true)} className="w-full h-full border-0 absolute inset-0" title="نقشه غرفه" allow="fullscreen; accelerometer; gyroscope" />
+      <iframe src={boothMapUrl} onLoad={() => setMapState('loaded')} className="w-full h-full border-0 absolute inset-0" title="نقشه غرفه" allow="fullscreen; accelerometer; gyroscope" />
+      {/* Many sites refuse to be framed – always offer a way out. */}
+      <a
+        href={boothMapUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[110] inline-flex items-center gap-2 whitespace-nowrap bg-slate-900/80 backdrop-blur text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-xl"
+      >
+        <ExternalLink className="w-4 h-4" />
+        باز کردن نقشه در صفحه جدید
+      </a>
     </motion.div>
   );
 
@@ -236,19 +346,29 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
     <div
       dir="rtl"
       style={themeStyle}
-      className={`@container ${embedded ? 'h-full overflow-y-auto overflow-x-hidden' : 'min-h-[100dvh] overflow-hidden'} flex flex-col px-5 py-2 @2xl:p-6 relative bg-(--c-bg) text-white`}
+      className={`@container ${embedded ? 'h-full overflow-y-auto overflow-x-hidden' : 'min-h-[100dvh] overflow-hidden'} flex flex-col px-5 py-2 @2xl:p-6 relative bg-(--c-bg) text-(--c-fg)`}
     >
       {theme.font === CUSTOM_FONT && theme.customFontUrl && (
-        <style>{`@font-face{font-family:'InviteCustomFont';src:url('${theme.customFontUrl}');font-display:swap;}`}</style>
+        <style>{`@font-face{font-family:'InviteCustomFont';src:url('${asset(theme.customFontUrl)}');font-display:swap;}`}</style>
       )}
 
       {/* Preload images to prevent flashing when changing steps */}
       <div className="hidden">
-        {company.logo && <img src={company.logo} alt="" />}
-        {company.icon && <img src={company.icon} alt="" />}
+        {company.logo && <img src={asset(company.logo)} alt="" />}
+        {company.icon && <img src={asset(company.icon)} alt="" />}
       </div>
 
-      <div className="absolute inset-0 z-0 bg-(--c-bg)">
+      {/* Background: poster is visible immediately (and stays when video can't autoplay, e.g. iOS Low Power Mode) */}
+      <div className="absolute inset-0 z-0 bg-(--c-bg) overflow-hidden">
+        {poster && (
+          <img
+            src={poster}
+            alt=""
+            onError={hideOnError}
+            style={{ opacity: media.videoOpacity / 100 }}
+            className="absolute inset-0 w-full h-full object-cover @3xl:blur-2xl @3xl:scale-110"
+          />
+        )}
         {media.video && (
           <video
             key={media.video}
@@ -258,12 +378,12 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
             muted
             playsInline
             preload="auto"
-            poster={media.videoPoster || undefined}
+            poster={poster || undefined}
             onCanPlay={() => setIsVideoLoaded(true)}
             style={{ opacity: isVideoLoaded ? media.videoOpacity / 100 : 0 }}
-            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ease-in-out"
+            className="absolute inset-0 w-full h-full object-cover @3xl:object-contain transition-opacity duration-1000 ease-in-out"
           >
-            <source src={media.video} type={mediaType(media.video)} />
+            <source src={asset(media.video)} type={mediaType(media.video)} />
           </video>
         )}
       </div>
@@ -275,7 +395,7 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
       </div>
 
       {media.music && (
-        <audio key={media.music} ref={audioRef} loop preload="auto" src={media.music} onPlay={() => setIsMusicPlaying(true)} onPause={() => setIsMusicPlaying(false)} />
+        <audio key={media.music} ref={audioRef} loop preload="none" src={asset(media.music)} onPlay={() => setIsMusicPlaying(true)} onPause={() => setIsMusicPlaying(false)} />
       )}
 
       {media.music && (
@@ -297,27 +417,32 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
               <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.8 }} className="mb-8 relative">
                 <div className="absolute inset-0 bg-white/20 blur-xl rounded-full" />
                 {company.logo ? (
-                  <img src={company.logo} alt={company.name} className="w-72 max-h-40 object-contain h-auto mx-auto drop-shadow-2xl relative z-10" />
+                  <img src={asset(company.logo)} alt={company.name} onError={hideOnError} className="w-72 max-h-40 object-contain h-auto mx-auto drop-shadow-2xl relative z-10" />
                 ) : (
-                  <p className="relative z-10 text-4xl font-black drop-shadow-2xl">{company.name || 'نام شرکت'}</p>
+                  <p className="relative z-10 text-4xl font-black drop-shadow-2xl break-words">{company.name || 'نام شرکت'}</p>
                 )}
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6, duration: 0.8 }} className="bg-white/90 backdrop-blur-xl p-5 @2xl:p-8 rounded-3xl border border-white/50 shadow-2xl">
-                <h1 className="text-3xl font-black text-(--c-primary) mb-0 leading-tight relative z-10">
-                  {event.badge && <span className="block text-(--c-accent) text-xl mb-2 @2xl:mb-3 font-bold">{event.badge}</span>}
+                {ended && (
+                  <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100 rounded-full px-3 py-1">
+                    <CalendarX className="w-3.5 h-3.5" /> این رویداد به پایان رسیده است
+                  </p>
+                )}
+                <h1 className="text-3xl font-black text-(--c-primary-ink) mb-0 leading-tight relative z-10 break-words">
+                  {event.badge && <span className="block text-(--c-accent-ink) text-xl mb-2 @2xl:mb-3 font-bold">{event.badge}</span>}
                   {event.title || 'نام نمایشگاه'}
                 </h1>
 
                 {event.logo ? (
                   <div className="w-full flex justify-center items-center -mt-4 @2xl:-mt-5 -mb-3 @2xl:-mb-5 relative z-0">
-                    <img src={event.logo} alt={event.title} className="h-24 @2xl:h-28 max-w-full w-auto object-contain" />
+                    <img src={asset(event.logo)} alt={event.title} onError={hideOnError} className="h-24 @2xl:h-28 max-w-full w-auto object-contain" />
                   </div>
                 ) : (
                   <div className="h-4" />
                 )}
 
-                {event.welcomeText && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10">{event.welcomeText}</p>}
+                {event.welcomeText && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{event.welcomeText}</p>}
 
                 <button onClick={enter} className={`flex items-center justify-center gap-2 text-white px-8 py-4 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
                   <span className="text-lg">{texts.enterButton}</span>
@@ -332,23 +457,23 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
             <motion.div key="step2" initial={{ opacity: 0, scale: 0.95, y: 50 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: -50 }} transition={spring} className="bg-white/90 backdrop-blur-xl p-4 @2xl:p-6 pb-4 @2xl:pb-5 rounded-3xl border border-white/50 shadow-2xl text-slate-800 w-full relative mt-6">
               <div className="absolute -top-7 @2xl:-top-10 left-1/2 transform -translate-x-1/2 bg-white p-2.5 @2xl:p-3 rounded-full shadow-xl z-10">
                 {company.icon ? (
-                  <img src={company.icon} alt={company.name} className="w-12 h-12 @2xl:w-16 @2xl:h-16 object-contain" />
+                  <img src={asset(company.icon)} alt={company.name} onError={hideOnError} className="w-12 h-12 @2xl:w-16 @2xl:h-16 object-contain" />
                 ) : (
-                  <div className="w-12 h-12 @2xl:w-16 @2xl:h-16 rounded-full bg-(--c-primary) text-white flex items-center justify-center text-2xl font-black">{company.name.trim().charAt(0) || '؟'}</div>
+                  <div className="w-12 h-12 @2xl:w-16 @2xl:h-16 rounded-full bg-(--c-btn-primary) text-white flex items-center justify-center text-2xl font-black">{company.name.trim().charAt(0) || '؟'}</div>
                 )}
               </div>
 
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="space-y-2 @2xl:space-y-3 pt-8 @2xl:pt-10">
                 {letterParagraphs.map((p, i) => (
-                  <p key={i} className="text-[14.5px] @2xl:text-[17px] leading-[1.6] @2xl:leading-[1.7] font-medium text-justify whitespace-pre-line">
+                  <p key={i} className="text-[14.5px] @2xl:text-[17px] leading-[1.6] @2xl:leading-[1.7] font-medium text-justify whitespace-pre-line break-words">
                     {p}
                   </p>
                 ))}
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="text-center pt-3 @2xl:pt-4 border-t border-slate-200 mt-3 @2xl:mt-4">
-                <p className="font-bold text-(--c-primary) text-sm @2xl:text-base">{company.name}</p>
-                {company.tagline && <p className="text-xs @2xl:text-sm font-semibold text-(--c-accent) mt-0.5 @2xl:mt-1">{company.tagline}</p>}
+                <p className="font-bold text-(--c-primary-ink) text-sm @2xl:text-base">{company.name}</p>
+                {company.tagline && <p className="text-xs @2xl:text-sm font-semibold text-(--c-accent-ink) mt-0.5 @2xl:mt-1">{company.tagline}</p>}
               </motion.div>
 
               <motion.button initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.6 }} onClick={() => goTo(3)} className={`mt-4 @2xl:mt-5 flex items-center justify-center gap-2 text-white px-6 @2xl:px-8 py-2.5 @2xl:py-3 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
@@ -356,7 +481,7 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
                 <ChevronLeft className="w-4 h-4 @2xl:w-5 @2xl:h-5" />
               </motion.button>
 
-              <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }} onClick={() => goTo(1)} className="mt-3 @2xl:mt-4 text-[13px] @2xl:text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors flex items-center justify-center gap-1 mx-auto w-full">
+              <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }} onClick={() => goBack(1)} className="mt-3 @2xl:mt-4 text-[13px] @2xl:text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors flex items-center justify-center gap-1 mx-auto w-full">
                 <ChevronRight className="w-4 h-4" />
                 بازگشت به صفحه قبل
               </motion.button>
@@ -366,43 +491,32 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
           {/* STEP 3: TIME & PLACE */}
           {step >= 3 && (
             <motion.div key="step3" initial={{ opacity: 0, scale: 0.95, y: 50 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: -50 }} transition={spring} className="w-full flex flex-col gap-4">
-              <div className="bg-white/90 backdrop-blur-xl p-4 @2xl:p-6 rounded-3xl border border-white/50 shadow-2xl space-y-3 @2xl:space-y-5">
-                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="flex items-center gap-3 @2xl:gap-4 text-slate-800">
-                  <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent)">
+              <div className="bg-white/90 backdrop-blur-xl p-4 @2xl:p-6 rounded-3xl border border-white/50 shadow-2xl space-y-3 @2xl:space-y-5 text-slate-800">
+                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="flex items-center gap-3 @2xl:gap-4">
+                  <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
                     <CalendarIcon className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
                   </div>
                   <span className="font-bold text-base @2xl:text-lg">{event.dateLabel || 'تاریخ برگزاری'}</span>
                 </motion.div>
 
-                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }} className="flex items-center gap-3 @2xl:gap-4 text-slate-800">
-                  <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent)">
-                    <Clock className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
-                  </div>
-                  <span className="font-bold text-base @2xl:text-lg">{event.timeLabel}</span>
-                </motion.div>
+                {event.timeLabel && (
+                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }} className="flex items-center gap-3 @2xl:gap-4">
+                    <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
+                      <Clock className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
+                    </div>
+                    <span className="font-bold text-base @2xl:text-lg">{event.timeLabel}</span>
+                  </motion.div>
+                )}
 
-                <motion.a
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 }}
-                  href={mapUrl || undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 @2xl:gap-4 text-slate-800 hover:text-(--c-accent) transition-colors group"
-                >
-                  <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent) group-hover:bg-(--c-accent)/20 transition-colors">
-                    <MapPin className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="font-bold text-base @2xl:text-lg leading-tight">{event.location || 'محل برگزاری'}</span>
-                    {mapUrl && (
-                      <span className="text-xs @2xl:text-sm text-(--c-accent) font-bold mt-1 opacity-80 group-hover:opacity-100 flex items-center gap-1">
-                        <Map className="w-3.5 h-3.5 @2xl:w-4 @2xl:h-4" />
-                        برای مسیریابی روی نقشه کلیک کنید
-                      </span>
-                    )}
-                  </div>
-                </motion.a>
+                {mapUrl ? (
+                  <motion.a initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} href={mapUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 @2xl:gap-4 hover:text-(--c-accent-ink) transition-colors group">
+                    {locationInner}
+                  </motion.a>
+                ) : (
+                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} className="flex items-center gap-3 @2xl:gap-4">
+                    {locationInner}
+                  </motion.div>
+                )}
 
                 {event.booth && (
                   <motion.button
@@ -412,12 +526,12 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.8 }}
-                    className="w-full text-right flex items-center gap-3 @2xl:gap-4 text-slate-800 enabled:hover:text-(--c-accent) transition-colors group pt-3 @2xl:pt-4 border-t border-slate-200"
+                    className="w-full text-right flex items-center gap-3 @2xl:gap-4 enabled:hover:text-(--c-accent-ink) transition-colors group pt-3 @2xl:pt-4 border-t border-slate-200"
                   >
-                    <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent) group-enabled:group-hover:bg-(--c-accent)/20 transition-colors">
+                    <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
                       <Building className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
                     </div>
-                    <span className="font-bold text-base @2xl:text-lg leading-tight">{event.booth}</span>
+                    <span className="font-bold text-base @2xl:text-lg leading-tight break-words min-w-0">{event.booth}</span>
                   </motion.button>
                 )}
               </div>
@@ -445,8 +559,8 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
 
                 {isInApp && calendarReady && (
                   <button
-                    onClick={async () => showToast((await copyText(shareUrl || window.location.href)) ? 'لینک کپی شد؛ آن را در مرورگر باز کنید' : 'لینک را از منوی بالای صفحه باز کنید')}
-                    className="flex items-center justify-center gap-2 text-[11px] @2xl:text-xs text-white/90 bg-black/30 backdrop-blur rounded-xl py-2 px-3"
+                    onClick={async () => showToast((await copyText(pageUrl())) ? 'لینک کپی شد؛ آن را در مرورگر باز کنید' : 'لینک را از منوی بالای صفحه باز کنید')}
+                    className="flex items-center justify-center gap-2 text-[11px] @2xl:text-xs text-white/90 bg-black/40 backdrop-blur rounded-xl py-2 px-3"
                   >
                     <Copy className="w-3.5 h-3.5 shrink-0" />
                     برای ثبت در تقویم، صفحه را در مرورگر (کروم/سافاری) باز کنید — کپی لینک
@@ -458,7 +572,7 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
                   <span className="text-base @2xl:text-lg">{texts.shareButton}</span>
                 </button>
 
-                <button onClick={() => goTo(2)} className="mt-2 @2xl:mt-5 text-xs @2xl:text-sm font-semibold text-white/70 hover:text-white transition-colors flex items-center justify-center gap-1 mx-auto">
+                <button onClick={() => goBack(2)} className="mt-2 @2xl:mt-5 text-xs @2xl:text-sm font-semibold text-(--c-fg)/70 hover:text-(--c-fg) transition-colors flex items-center justify-center gap-1 mx-auto">
                   <ChevronRight className="w-4 h-4" />
                   بازگشت به صفحه قبل
                 </button>
@@ -483,12 +597,12 @@ export default function InvitationView({ config, embedded = false, focusStep, sh
             className="relative mt-4 z-10 flex flex-col items-center justify-center cursor-pointer group"
           >
             {footer.text && (
-              <div dir="ltr" className="flex items-center gap-1.5 text-white/80 group-hover:text-white transition-colors drop-shadow-md">
+              <div dir="ltr" className="flex items-center gap-1.5 text-(--c-fg)/80 group-hover:text-(--c-fg) transition-colors drop-shadow-md">
                 {footerUrl.includes('instagram.com') && <InstagramIcon className="w-3.5 h-3.5 @2xl:w-4 @2xl:h-4" />}
                 <p className="text-[9px] @2xl:text-[10px] font-semibold tracking-[0.2em] mt-0.5 uppercase">{footer.text}</p>
               </div>
             )}
-            {footer.subText && <p className="text-[10px] @2xl:text-[11px] text-white/60 group-hover:text-white/80 transition-colors font-medium drop-shadow-md mt-1 tracking-wide">{footer.subText}</p>}
+            {footer.subText && <p className="text-[10px] @2xl:text-[11px] text-(--c-fg)/60 group-hover:text-(--c-fg)/80 transition-colors font-medium drop-shadow-md mt-1 tracking-wide">{footer.subText}</p>}
           </motion.a>
         )}
       </AnimatePresence>
