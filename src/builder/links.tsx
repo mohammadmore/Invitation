@@ -107,7 +107,7 @@ export default function LinksStep({
   if (!recordId) {
     return (
       <Section title="لینک‌ها و کارشناس‌ها" description="برای ساخت لینک‌های جداگانه، ابتدا دعوتنامه باید ذخیره شود.">
-        <button onClick={() => onEnsureSaved()} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white text-sm font-bold px-4 py-2.5">
+        <button onClick={() => onEnsureSaved()} className="inline-flex items-center gap-2 rounded-xl btn-ink text-sm font-bold px-4 py-2.5">
           <Save className="w-4 h-4" /> ذخیره دعوتنامه
         </button>
       </Section>
@@ -349,7 +349,7 @@ function LinksSection({ tracking, set, liveSlug, published }: { tracking: Tracki
           </select>
           <TextInput ltr value={custom} maxLength={24} onChange={e => setCustom(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="کد دلخواه (اختیاری)، مثلاً ali" />
         </div>
-        <button type="button" onClick={createOne} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2">
+        <button type="button" onClick={createOne} className="inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2">
           <Link2 className="w-4 h-4" /> ساخت لینک
         </button>
       </div>
@@ -375,7 +375,7 @@ function LinksSection({ tracking, set, liveSlug, published }: { tracking: Tracki
             </button>
           ))}
         </div>
-        <button type="button" onClick={createBulk} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2">
+        <button type="button" onClick={createBulk} className="inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2">
           <Wand2 className="w-4 h-4" /> ساخت {fa(Math.max(1, bulkReps.length) * bulkChannels.length)} لینک
         </button>
         <p className="text-[11px] text-slate-500">اگر کارشناسی انتخاب نشود، لینک‌های شرکت (بدون کارشناس) برای هر کانال ساخته می‌شود.</p>

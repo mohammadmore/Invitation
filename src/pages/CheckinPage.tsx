@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, CameraOff, CircleCheck, CloudOff, Keyboard, Loader2, RefreshCw, RotateCcw, Search, ScanLine, TriangleAlert, UserPlus, Users, Wifi, XCircle } from 'lucide-react';
 import { apiUrl, BASE } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
-import { useAdminTheme } from '../lib/adminTheme';
+import { ColorModeToggle, useAdminTheme } from '../lib/adminTheme';
 import { offlineStore, newOpId, type CheckinOp, type Problem } from '../lib/checkinOffline';
 import { ticketFromScan, type CheckinGuest, type ScanStatus } from '../shared/checkin';
 import { channelLabel } from '../shared/tracking';
@@ -122,7 +122,7 @@ export default function CheckinPage({ id }: { id: string }) {
   const cached = useMemo(() => store.loadData(), [store]);
   const [info, setInfo] = useState<Info | null>(cached?.info ?? null);
   // Dark glass in the invitation's own palette (cached, so it works offline too)
-  const palette = useAdminTheme(info?.theme, 'dark');
+  const { style: palette } = useAdminTheme(info?.theme, 'dark');
   // Read inside the sync callbacks through a ref, so they stay stable (no effect re-run loops).
   const infoRef = useRef<Info | null>(info);
   infoRef.current = info;
@@ -306,7 +306,7 @@ export default function CheckinPage({ id }: { id: string }) {
 
   if (fatal) {
     return (
-      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 admin-bg-dark text-white p-6 text-center" style={palette}>
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 admin-bg text-slate-50 p-6 text-center" style={palette}>
         <p className="text-2xl font-black">{fatal === 'revoked' ? 'صفحه ثبت حضور در دسترس نیست' : 'اتصال برقرار نشد'}</p>
         <p className="text-slate-400 text-sm leading-relaxed">
           {fatal === 'revoked'
@@ -314,7 +314,7 @@ export default function CheckinPage({ id }: { id: string }) {
             : 'برای استفاده آفلاین، این صفحه باید یک بار با اینترنت باز شود تا فهرست مهمانان روی گوشی ذخیره شود.'}
         </p>
         {fatal === 'firstload' && (
-          <button onClick={() => (setFatal(''), refresh())} className="mt-2 rounded-xl bg-white text-slate-900 font-bold px-5 py-2.5">
+          <button onClick={() => (setFatal(''), refresh())} className="mt-2 rounded-xl bg-slate-50 text-slate-900 font-bold px-5 py-2.5">
             تلاش دوباره
           </button>
         )}
@@ -323,14 +323,14 @@ export default function CheckinPage({ id }: { id: string }) {
   }
   if (!info) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center admin-bg-dark" style={palette}>
+      <div className="min-h-[100dvh] flex items-center justify-center admin-bg" style={palette}>
         <Loader2 className="w-8 h-8 animate-spin text-(color:--ad-ink)" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-[100dvh] admin-bg-dark text-white pb-24" style={palette}>
+    <div className="min-h-[100dvh] admin-bg text-slate-50 pb-24" style={palette}>
       <header className="px-4 pt-4 pb-3 space-y-3 max-w-xl mx-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -339,7 +339,8 @@ export default function CheckinPage({ id }: { id: string }) {
               {info.company} — {info.event}
             </p>
           </div>
-          <input value={staff} onChange={e => setStaff(e.target.value)} placeholder="نام شما (متصدی)" className="w-36 rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs outline-none focus:border-(color:--ad-ink)" />
+          <ColorModeToggle className="mr-auto -mt-1 text-slate-300" />
+          <input value={staff} onChange={e => setStaff(e.target.value)} placeholder="نام شما (متصدی)" className="w-36 rounded-xl bg-slate-50/10 border border-slate-50/10 px-3 py-2 text-xs outline-none focus:border-(color:--ad-ink)" />
         </div>
         <SyncBar online={online} queued={queue.length} syncing={syncing} lastSync={lastSync} offlineReady={offlineReady} onSync={() => flush().then(() => refresh())} />
         {problems.length > 0 && (
@@ -374,7 +375,7 @@ export default function CheckinPage({ id }: { id: string }) {
 
       {result && <ResultCard result={result} onClose={() => setResult(null)} onUndo={g => submit({ type: 'undo', rsvpId: g.id })} />}
 
-      <nav className="fixed bottom-0 inset-x-0 glass-dark !border-x-0 !border-b-0 pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 inset-x-0 glass !border-x-0 !border-b-0 pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto grid grid-cols-4">
           {(
             [
@@ -408,7 +409,7 @@ function SyncBar({ online, queued, syncing, lastSync, offlineReady, onSync }: { 
           {offlineReady && ' · آماده استفاده بدون اینترنت'}
         </span>
       </span>
-      <button onClick={onSync} disabled={syncing} className="shrink-0 rounded-lg bg-white/10 px-2 py-1 inline-flex items-center gap-1 disabled:opacity-60" aria-label="همگام‌سازی">
+      <button onClick={onSync} disabled={syncing} className="shrink-0 rounded-lg bg-slate-50/10 px-2 py-1 inline-flex items-center gap-1 disabled:opacity-60" aria-label="همگام‌سازی">
         <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
         همگام‌سازی
       </button>
@@ -418,7 +419,7 @@ function SyncBar({ online, queued, syncing, lastSync, offlineReady, onSync }: { 
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl glass-dark py-2">
+    <div className="rounded-2xl glass py-2">
       <p className="text-xl font-black tabular-nums">{value}</p>
       <p className="text-[10px] text-slate-400 font-bold">{label}</p>
     </div>
@@ -546,7 +547,7 @@ function Scanner({ onCode, paused }: { onCode: (code: string) => void; paused: b
 
   return (
     <div className="space-y-3">
-      <div className="relative aspect-square rounded-3xl overflow-hidden bg-black border border-white/10">
+      <div className="no-invert relative aspect-square rounded-3xl overflow-hidden bg-black border border-slate-50/10">
         <video ref={videoRef} playsInline muted className={`w-full h-full object-cover ${on ? '' : 'hidden'}`} />
         {on && <div className="absolute inset-[18%] border-4 border-(color:--ad-ink)/80 rounded-3xl pointer-events-none" />}
         {!on && (
@@ -580,7 +581,7 @@ function Scanner({ onCode, paused }: { onCode: (code: string) => void; paused: b
             value={manual}
             onChange={e => setManual(e.target.value.toUpperCase())}
             placeholder="کد ۸ حرفی بلیت"
-            className="w-full rounded-xl bg-white/10 border border-white/10 pr-9 pl-3 py-3 font-mono tracking-widest placeholder:tracking-normal placeholder:font-sans outline-none focus:border-(color:--ad-ink)"
+            className="w-full rounded-xl bg-slate-50/10 border border-slate-50/10 pr-9 pl-3 py-3 font-mono tracking-widest placeholder:tracking-normal placeholder:font-sans outline-none focus:border-(color:--ad-ink)"
           />
         </div>
         <button className="rounded-xl btn-ad text-white font-black px-4">ثبت</button>
@@ -598,10 +599,10 @@ function SearchList({ guests, onCheckIn }: { guests: CheckinGuest[]; onCheckIn: 
   }, [q, guests]);
   return (
     <div className="space-y-3">
-      <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="نام، شرکت، تلفن یا کد بلیت…" className="w-full rounded-xl bg-white/10 border border-white/10 px-3.5 py-3 outline-none focus:border-(color:--ad-ink)" />
+      <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="نام، شرکت، تلفن یا کد بلیت…" className="w-full rounded-xl bg-slate-50/10 border border-slate-50/10 px-3.5 py-3 outline-none focus:border-(color:--ad-ink)" />
       <ul className="space-y-2">
         {list.map(g => (
-          <li key={g.id} className="flex items-center gap-3 rounded-2xl glass-dark p-3">
+          <li key={g.id} className="flex items-center gap-3 rounded-2xl glass p-3">
             <div className="flex-1 min-w-0">
               <GuestLine g={g} />
             </div>
@@ -626,7 +627,7 @@ function WalkIn({ onSubmit }: { onSubmit: (d: { name: string; phone: string; org
   const [org, setOrg] = useState('');
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
-  const input = 'w-full rounded-xl bg-white/10 border border-white/10 px-3.5 py-3 outline-none focus:border-(color:--ad-ink)';
+  const input = 'w-full rounded-xl bg-slate-50/10 border border-slate-50/10 px-3.5 py-3 outline-none focus:border-(color:--ad-ink)';
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -649,7 +650,7 @@ function WalkIn({ onSubmit }: { onSubmit: (d: { name: string; phone: string; org
       <input dir="ltr" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="شماره تماس" className={`${input} text-left`} />
       <label className="flex items-center gap-3 text-sm text-slate-300">
         تعداد نفرات
-        <input type="number" min={1} max={20} value={count} onChange={e => setCount(Math.max(1, Number(e.target.value) || 1))} className="w-20 rounded-xl bg-white/10 border border-white/10 px-3 py-2" />
+        <input type="number" min={1} max={20} value={count} onChange={e => setCount(Math.max(1, Number(e.target.value) || 1))} className="w-20 rounded-xl bg-slate-50/10 border border-slate-50/10 px-3 py-2" />
       </label>
       <button disabled={busy || !name.trim()} className="w-full rounded-2xl btn-ad text-white font-black py-3.5 disabled:opacity-50">
         ثبت و ورود
@@ -663,7 +664,7 @@ function PresentList({ guests, onUndo }: { guests: CheckinGuest[]; onUndo: (g: C
   return (
     <ul className="space-y-2">
       {sorted.map(g => (
-        <li key={g.id} className="flex items-center gap-3 rounded-2xl glass-dark p-3">
+        <li key={g.id} className="flex items-center gap-3 rounded-2xl glass p-3">
           <span className="text-xs font-bold text-emerald-400 w-12 shrink-0 tabular-nums">{timeOf(g.checkedInAt)}</span>
           <div className="flex-1 min-w-0">
             <GuestLine g={g} />

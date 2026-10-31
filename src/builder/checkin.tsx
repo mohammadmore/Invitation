@@ -73,7 +73,7 @@ export default function CheckinSection({ recordId, rsvpEnabled }: { recordId: st
                   setCopied(true);
                   window.setTimeout(() => setCopied(false), 1500);
                 }}
-                className="rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2"
+                className="rounded-xl btn-ink text-xs font-bold px-3 py-2"
               >
                 {copied ? 'کپی شد' : 'کپی'}
               </button>

@@ -3,7 +3,7 @@ import { BarChart3, Copy, Loader2 } from 'lucide-react';
 import { api, type RepReport } from '../lib/api';
 import { linkUrl } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
-import { useAdminTheme } from '../lib/adminTheme';
+import { ColorModeToggle, useAdminTheme } from '../lib/adminTheme';
 import { channelLabel } from '../shared/tracking';
 import Dashboard from '../builder/dashboard';
 import { RsvpTable } from '../builder/panels';
@@ -14,7 +14,7 @@ export default function RepReportPage({ id }: { id: string }) {
   const [report, setReport] = useState<RepReport | null>(null);
   const [error, setError] = useState(false);
   // Glass in the invitation's own palette
-  const palette = useAdminTheme(report?.theme);
+  const { style: palette } = useAdminTheme(report?.theme);
   const repId = new URLSearchParams(window.location.search).get('rep') || '';
   const token = decodeURIComponent(window.location.hash.slice(1));
 
@@ -54,6 +54,7 @@ export default function RepReportPage({ id }: { id: string }) {
               {report.company} — {report.event}
             </p>
           </div>
+          <ColorModeToggle className="mr-auto text-slate-600" />
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">

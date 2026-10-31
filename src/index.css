@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./theme-invert.css";
 
 @theme {
   --font-sans: "Vazirmatn", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
@@ -56,8 +57,7 @@ body {
 }
 
 @layer components {
-  .admin-bg,
-  .admin-bg-dark {
+  .admin-bg {
     background-color: var(--ad-base, #f5f3ff);
     background-image:
       radial-gradient(42rem 32rem at 100% -5%, color-mix(in srgb, var(--ad-1) 42%, transparent), transparent 70%),
@@ -65,25 +65,24 @@ body {
       radial-gradient(40rem 34rem at 70% 110%, color-mix(in srgb, var(--ad-3) 34%, transparent), transparent 70%);
     background-attachment: fixed;
   }
-  .admin-bg-dark {
+  .ui-dark .admin-bg,
+  .ui-dark.admin-bg {
     background-image:
       radial-gradient(42rem 32rem at 100% -5%, color-mix(in srgb, var(--ad-1) 45%, transparent), transparent 70%),
       radial-gradient(36rem 30rem at -10% 40%, color-mix(in srgb, var(--ad-2) 35%, transparent), transparent 70%),
       radial-gradient(40rem 34rem at 70% 110%, color-mix(in srgb, var(--ad-3) 38%, transparent), transparent 70%);
   }
   .glass {
-    background-color: rgb(255 255 255 / 0.7);
+    background-color: var(--glass-bg);
     -webkit-backdrop-filter: blur(18px) saturate(170%);
     backdrop-filter: blur(18px) saturate(170%);
-    border: 1px solid rgb(255 255 255 / 0.75);
-    box-shadow: 0 10px 34px -12px color-mix(in srgb, var(--ad-1, #7c3aed) 28%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.6);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
   }
-  .glass-dark {
-    background-color: rgb(255 255 255 / 0.06);
-    -webkit-backdrop-filter: blur(18px) saturate(160%);
-    backdrop-filter: blur(18px) saturate(160%);
-    border: 1px solid rgb(255 255 255 / 0.12);
-    box-shadow: 0 12px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  /* Dark buttons that flip to light ones in dark mode */
+  .btn-ink {
+    background-color: var(--ink-bg);
+    color: var(--ink-fg);
   }
   .btn-ad {
     color: #fff;
@@ -102,7 +101,51 @@ body {
   }
 }
 
+/* ---------------------------------------------------------------- Light / dark mode
+   Every admin page root carries ui-light or ui-dark. A page designed light and shown dark
+   (or vice versa) also carries .invert-scales (theme-invert.css): Tailwind's colour scales
+   swap shades, so text-slate-900 becomes light text, bg-amber-50 a dark amber tint, etc.
+   .no-invert restores the real palette (the live invitation preview, phone frame). */
+.ui-light,
+.no-invert {
+  color-scheme: light;
+  --surface: #ffffff;
+  --glass-bg: rgb(255 255 255 / 0.7);
+  --glass-border: rgb(255 255 255 / 0.75);
+  --glass-shadow: 0 10px 34px -12px color-mix(in srgb, var(--ad-1, #7c3aed) 28%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.6);
+  --ink-bg: #0f172a;
+  --ink-fg: #ffffff;
+}
+.ui-dark {
+  color-scheme: dark;
+  --glass-bg: rgb(255 255 255 / 0.06);
+  --glass-border: rgb(255 255 255 / 0.12);
+  --glass-shadow: 0 12px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --ink-bg: #e2e8f0;
+  --ink-fg: #0f172a;
+}
+.ui-dark.invert-scales {
+  /* white cards/inputs of light-designed pages become a dark surface */
+  --surface: color-mix(in srgb, var(--ad-base, #160f2f) 70%, #1e1b2e);
+  /* pale fills and hairlines become translucent light layers instead of near-black */
+  --color-slate-50: rgb(255 255 255 / 0.045);
+  --color-slate-100: rgb(255 255 255 / 0.08);
+  --color-slate-200: rgb(255 255 255 / 0.13);
+}
+.no-invert { --surface: #ffffff; }
+
+@layer utilities {
+  .bg-white { background-color: var(--surface, #fff); }
+  .bg-white\/60 { background-color: color-mix(in oklab, var(--surface, #fff) 60%, transparent); }
+  .bg-white\/80 { background-color: color-mix(in oklab, var(--surface, #fff) 80%, transparent); }
+  .bg-white\/95 { background-color: color-mix(in oklab, var(--surface, #fff) 95%, transparent); }
+  @media (hover: hover) {
+    .hover\:bg-white\/60:hover { background-color: color-mix(in oklab, var(--surface, #fff) 60%, transparent); }
+    .hover\:bg-white\/70:hover { background-color: color-mix(in oklab, var(--surface, #fff) 70%, transparent); }
+  }
+}
+
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass { background-color: rgb(255 255 255 / 0.94); }
-  .glass-dark { background-color: rgb(30 27 60 / 0.92); }
+  .ui-light .glass { background-color: rgb(255 255 255 / 0.94); }
+  .ui-dark .glass { background-color: rgb(30 27 60 / 0.92); }
 }

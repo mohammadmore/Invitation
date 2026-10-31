@@ -27,7 +27,7 @@ import InvitationView from '../invitation/InvitationView';
 import { api, ApiError, editUrl, getAdminPassword, getMyInvitations, inviteUrl, saveMyInvitation, serverMeta, setAdminPassword, setEditAuth, updateMyInvitation, type Feedback, type RecordStatus, type RecordView } from '../lib/api';
 import { previewUrl, route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
-import { useAdminTheme } from '../lib/adminTheme';
+import { ColorModeToggle, useAdminTheme } from '../lib/adminTheme';
 import { blankInvitation, ITEMS, sanitizeInvitation, STEP, validateForPublish, type CopyMode, type InvitationConfig, type Issue } from '../shared/invitation';
 import { ensureContrast } from '../shared/color';
 import { BasicsStep, BrandStep, EnglishStep, EventStep, GuestsStep, MediaStep, TextsStep, type SlugState, type Update } from '../builder/steps';
@@ -100,7 +100,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const [slugState, setSlugState] = useState<SlugState>('idle');
   const [loadState, setLoadState] = useState<LoadState>('loading');
   // Glass admin in this invitation's own palette (live while the brand colours are edited)
-  const palette = useAdminTheme(loadState === 'ready' ? config.theme : null);
+  const { style: palette } = useAdminTheme(loadState === 'ready' ? config.theme : null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -402,6 +402,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
             {record && <p className={`text-[11px] font-bold ${record.status === 'draft' ? 'text-slate-500' : record.status === 'changed' ? 'text-amber-600' : 'text-emerald-600'}`}>{STATUS_LABEL[record.status]}</p>}
           </div>
           <div className="flex-1" />
+          <ColorModeToggle className="text-slate-600" />
           <SaveIndicator state={saveState} error={saveError} lastSaved={lastSaved} onSave={() => save(config)} />
           {record && (
             <>
@@ -572,7 +573,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
       </div>
 
       {showPreview && (
-        <div className="fixed inset-0 z-50 bg-slate-950 md:hidden">
+        <div className="no-invert fixed inset-0 z-50 bg-slate-950 md:hidden">
           <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} link={step === STEP.links ? previewLink.link : null} repCard={previewLink.t?.settings.repCard ?? true} showCompanyContact={previewLink.t?.settings.showCompanyContact ?? true} />
           <button onClick={() => setShowPreview(false)} className="absolute top-4 right-4 z-[200] inline-flex items-center gap-1.5 bg-white text-slate-900 rounded-full pl-4 pr-3 py-2 shadow-xl text-sm font-bold" aria-label="بستن پیش‌نمایش">
             <X className="w-5 h-5" /> بازگشت به ویرایش
@@ -622,7 +623,7 @@ function SaveIndicator({ state, error, lastSaved, onSave }: { state: SaveState; 
       <button
         onClick={onSave}
         disabled={state === 'saving'}
-        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-60 ${state === 'dirty' || state === 'error' || state === 'idle' ? 'bg-slate-900 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-600'}`}
+        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-60 ${state === 'dirty' || state === 'error' || state === 'idle' ? 'btn-ink hover:opacity-90' : 'bg-slate-100 text-slate-600'}`}
         title={error || 'ذخیره پیش‌نویس روی سرور'}
       >
         <Save className="w-4 h-4" /> ذخیره
@@ -633,7 +634,7 @@ function SaveIndicator({ state, error, lastSaved, onSave }: { state: SaveState; 
 
 function PhoneFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-[360px] h-[min(740px,calc(100dvh-11rem))] rounded-[2.75rem] border-[10px] border-slate-900 bg-slate-900 shadow-2xl overflow-hidden relative">
+    <div className="no-invert mx-auto w-full max-w-[360px] h-[min(740px,calc(100dvh-11rem))] rounded-[2.75rem] border-[10px] border-slate-900 bg-slate-900 shadow-2xl overflow-hidden relative">
       <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-5 bg-slate-900 rounded-full z-[300]" />
       <div className="w-full h-full rounded-[2rem] overflow-hidden relative">{children}</div>
     </div>
@@ -706,7 +707,7 @@ function CopyButton({ text, label = 'کپی' }: { text: string; label?: string }
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1800);
       }}
-      className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2.5 hover:bg-slate-700"
+      className="shrink-0 inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2.5 hover:bg-slate-700"
     >
       {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
       {copied ? 'کپی شد' : label}
@@ -794,7 +795,7 @@ function PublishStep({
               await onSaveForPreview();
               setBusyPreview(false);
             }}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white text-sm font-bold px-4 py-2.5 disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-xl btn-ink text-sm font-bold px-4 py-2.5 disabled:opacity-60"
           >
             {busyPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} ذخیره و ساخت لینک پیش‌نمایش
           </button>
@@ -818,7 +819,7 @@ function PublishStep({
               <div className="space-y-2 text-center sm:text-right">
                 <p className="font-bold text-sm">کد QR دعوتنامه</p>
                 <p className="text-xs text-slate-500 leading-relaxed">برای چاپ روی کارت ویزیت، بنر یا دعوتنامه کاغذی.</p>
-                <a href={qr} download={`invite-${liveSlug}-qr.png`} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2.5">
+                <a href={qr} download={`invite-${liveSlug}-qr.png`} className="inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2.5">
                   <Download className="w-4 h-4" /> دانلود QR
                 </a>
               </div>

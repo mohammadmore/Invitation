@@ -27,7 +27,7 @@ export interface HideProps {
 
 export function HideToggle({ checked, onChange }: HideProps) {
   return (
-    <label className={`inline-flex items-center gap-1.5 text-[11px] font-bold cursor-pointer select-none rounded-lg px-2 py-1 transition ${checked ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+    <label className={`inline-flex items-center gap-1.5 text-[11px] font-bold cursor-pointer select-none rounded-lg px-2 py-1 transition ${checked ? 'btn-ink' : 'text-slate-500 hover:bg-slate-100'}`}>
       <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="accent-slate-800 w-3.5 h-3.5" />
       نمایش داده نشود
     </label>
@@ -380,7 +380,7 @@ export function AudioPreview({ src }: { src: string }) {
           if (a.paused) a.play().catch(() => {});
           else a.pause();
         }}
-        className="inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-full bg-slate-900 text-white hover:brightness-110 transition"
+        className="inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-full btn-ink hover:brightness-110 transition"
       >
         {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
       </span>

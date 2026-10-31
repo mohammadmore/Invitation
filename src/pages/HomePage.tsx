@@ -6,11 +6,7 @@ import type { CopyMode } from '../shared/invitation';
 import { api, editUrl, forgetMyInvitation, getAdminPassword, getMyInvitations, saveMyInvitation, setAdminPassword, setEditAuth, type MyInvitation, type RecordStatus, type RecordSummary } from '../lib/api';
 import { route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
-import { useAdminTheme } from '../lib/adminTheme';
-import { adminPalette } from '../shared/color';
-
-/** White modals on the dark home page use the light studio palette. */
-const LIGHT_VARS = adminPalette(null) as React.CSSProperties;
+import { ColorModeToggle, scopeClass, useAdminTheme } from '../lib/adminTheme';
 
 type Filter = 'all' | 'draft' | 'published' | 'changed' | 'ended' | 'feedback';
 const FILTERS: [Filter, string][] = [
@@ -42,7 +38,8 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [issued, setIssued] = useState<{ name: string; url: string } | null>(null);
-  const palette = useAdminTheme(null, 'dark');
+  // Markup is written dark; light mode inverts it
+  const { style: palette, mode } = useAdminTheme(null, 'dark');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [copyFrom, setCopyFrom] = useState<{ id: string; token?: string } | null>(null);
@@ -152,8 +149,9 @@ export default function HomePage() {
   const label = (company: string, event: string) => [company || 'بدون نام', event].filter(Boolean).join(' — ');
 
   return (
-    <div className="min-h-[100dvh] admin-bg-dark text-white" style={palette}>
+    <div className="min-h-[100dvh] admin-bg text-slate-50" style={palette}>
       <div className="relative max-w-3xl mx-auto px-5 py-12">
+        <ColorModeToggle className="absolute top-4 left-4 text-slate-300" />
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 text-(color:--ad-ink) bg-(color:--ad-ink)/10 border border-(color:--ad-ink)/20 rounded-full px-4 py-1.5 text-sm font-bold mb-5">
             <Sparkles className="w-4 h-4" />
@@ -176,7 +174,7 @@ export default function HomePage() {
             <h2 className="font-black text-lg mb-3">دعوتنامه‌های ساخته‌شده در این مرورگر</h2>
             <ul className="space-y-2">
               {mine.map(item => (
-                <li key={item.id} className="flex items-center gap-2 glass-dark rounded-2xl p-4">
+                <li key={item.id} className="flex items-center gap-2 glass rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-bold truncate">{label(item.company, item.event)}</p>
                     <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
@@ -185,14 +183,14 @@ export default function HomePage() {
                     </p>
                   </div>
                   {statuses[item.id] && statuses[item.id] !== 'draft' && (
-                    <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-white/10" title="مشاهده">
+                    <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-slate-50/10" title="مشاهده">
                       <ExternalLink className="w-5 h-5" />
                     </a>
                   )}
-                  <a href={editUrl(item.id, item.editToken)} className="p-2 rounded-xl hover:bg-white/10" title="ادامه ویرایش">
+                  <a href={editUrl(item.id, item.editToken)} className="p-2 rounded-xl hover:bg-slate-50/10" title="ادامه ویرایش">
                     <Pencil className="w-5 h-5" />
                   </a>
-                  <button onClick={() => setCopyFrom({ id: item.id, token: item.editToken })} className="p-2 rounded-xl hover:bg-white/10" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
+                  <button onClick={() => setCopyFrom({ id: item.id, token: item.editToken })} className="p-2 rounded-xl hover:bg-slate-50/10" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
                     <CopyPlus className="w-5 h-5" />
                   </button>
                   <button onClick={() => remove(item.id, label(item.company, item.event), item.editToken)} className="p-2 rounded-xl hover:bg-red-500/20 text-red-300" title="حذف">
@@ -209,7 +207,7 @@ export default function HomePage() {
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-black text-lg">همه دعوتنامه‌ها (مدیر)</h2>
               <span className="flex items-center gap-3">
-                <a href={route('settings')} className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white">
+                <a href={route('settings')} className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-slate-50">
                   <Settings className="w-4 h-4" /> تنظیمات سامانه
                 </a>
                 <button
@@ -218,7 +216,7 @@ export default function HomePage() {
                     setIsAdmin(false);
                     setAll([]);
                   }}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-50"
                 >
                   <LogOut className="w-4 h-4" /> خروج مدیر
                 </button>
@@ -227,7 +225,7 @@ export default function HomePage() {
             {issued && (
               <div className="mb-3 rounded-2xl bg-amber-400/10 border border-amber-400/30 p-4 text-sm space-y-2">
                 <p className="font-bold text-amber-200">لینک ویرایش جدید «{issued.name}» (فقط یک بار نمایش داده می‌شود):</p>
-                <input dir="ltr" readOnly value={issued.url} onFocus={e => e.target.select()} className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-xs font-mono" />
+                <input dir="ltr" readOnly value={issued.url} onFocus={e => e.target.select()} className="w-full rounded-xl bg-slate-950/30 border border-slate-50/10 px-3 py-2 text-xs font-mono" />
               </div>
             )}
             {all.length === 0 && <p className="text-slate-400 text-sm">هنوز دعوتنامه‌ای ساخته نشده است.</p>}
@@ -235,11 +233,11 @@ export default function HomePage() {
               <div className="mb-3 space-y-2">
                 <div className="relative">
                   <Search className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
-                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="جست‌وجو در نام شرکت، نمایشگاه یا آدرس…" className="w-full glass-dark rounded-xl pr-9 pl-3 py-2.5 text-sm outline-none focus:border-(color:--ad-ink)" />
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="جست‌وجو در نام شرکت، نمایشگاه یا آدرس…" className="w-full glass rounded-xl pr-9 pl-3 py-2.5 text-sm outline-none focus:border-(color:--ad-ink)" />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {FILTERS.map(([f, label]) => (
-                    <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-xs font-bold transition ${filter === f ? 'btn-ad text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                    <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-xs font-bold transition ${filter === f ? 'btn-ad text-white' : 'bg-slate-50/5 text-slate-300 hover:bg-slate-50/10'}`}>
                       {label} ({countOf(f).toLocaleString('fa-IR')})
                     </button>
                   ))}
@@ -249,7 +247,7 @@ export default function HomePage() {
             {all.length > 0 && filtered.length === 0 && <p className="text-slate-400 text-sm">موردی پیدا نشد.</p>}
             <ul className="space-y-2">
               {filtered.map(item => (
-                <li key={item.id} className="flex items-center gap-2 glass-dark rounded-2xl p-4">
+                <li key={item.id} className="flex items-center gap-2 glass rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-bold truncate">{label(item.company, item.event)}</p>
                     <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
@@ -280,17 +278,17 @@ export default function HomePage() {
                     </p>
                   </div>
                   {item.status !== 'draft' && (
-                    <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-white/10" title="مشاهده">
+                    <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-slate-50/10" title="مشاهده">
                       <ExternalLink className="w-5 h-5" />
                     </a>
                   )}
-                  <a href={route(`builder/${item.id}`)} className="p-2 rounded-xl hover:bg-white/10" title="ویرایش">
+                  <a href={route(`builder/${item.id}`)} className="p-2 rounded-xl hover:bg-slate-50/10" title="ویرایش">
                     <Pencil className="w-5 h-5" />
                   </a>
-                  <button onClick={() => setCopyFrom({ id: item.id })} className="p-2 rounded-xl hover:bg-white/10" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
+                  <button onClick={() => setCopyFrom({ id: item.id })} className="p-2 rounded-xl hover:bg-slate-50/10" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
                     <CopyPlus className="w-5 h-5" />
                   </button>
-                  <button onClick={() => resetToken(item)} className="p-2 rounded-xl hover:bg-white/10" title="صدور لینک ویرایش جدید">
+                  <button onClick={() => resetToken(item)} className="p-2 rounded-xl hover:bg-slate-50/10" title="صدور لینک ویرایش جدید">
                     <KeyRound className="w-5 h-5" />
                   </button>
                   {!mineIds.has(item.id) && (
@@ -306,14 +304,14 @@ export default function HomePage() {
           adminRequired && (
             <form onSubmit={login} className="flex flex-wrap items-center justify-center gap-2 text-sm">
               <Lock className="w-4 h-4 text-slate-500" />
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-(color:--ad-ink)" />
-              <button className="bg-white/10 hover:bg-white/20 rounded-xl px-4 py-2 font-bold">ورود مدیر</button>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="bg-slate-50/5 border border-slate-50/10 rounded-xl px-3 py-2 outline-none focus:border-(color:--ad-ink)" />
+              <button className="bg-slate-50/10 hover:bg-slate-50/20 rounded-xl px-4 py-2 font-bold">ورود مدیر</button>
               {error && <span className="text-red-300 w-full text-center">{error}</span>}
             </form>
           )
         )}
       </div>
-      <div className="text-slate-900" style={LIGHT_VARS}>{copyFrom && <DuplicateModal onClose={() => setCopyFrom(null)} onCopy={duplicate} />}</div>
+      <div className={`text-slate-900 ${scopeClass(mode, 'light')}`}>{copyFrom && <DuplicateModal onClose={() => setCopyFrom(null)} onCopy={duplicate} />}</div>
     </div>
   );
 }

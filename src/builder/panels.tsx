@@ -237,7 +237,7 @@ export function RsvpTable({ list, slug, onDelete }: { list: Rsvp[]; slug: string
               ]),
             )
           }
-          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2"
+          className="inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2"
         >
           <Download className="w-4 h-4" /> دانلود اکسل (CSV)
         </button>
@@ -349,7 +349,7 @@ export function PersonalLinks({ baseUrl, published }: { baseUrl: string; publish
       {baseUrl && links.length > 0 && (
         <>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => copy(links.map(l => `${l.name}: ${l.url}`).join('\n'), 'all')} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2">
+            <button onClick={() => copy(links.map(l => `${l.name}: ${l.url}`).join('\n'), 'all')} className="inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2">
               <Copy className="w-4 h-4" /> {copied === 'all' ? 'کپی شد' : `کپی همه (${fa(links.length)})`}
             </button>
             <button onClick={() => downloadFile('personal-links.csv', toCsv([['نام', 'لینک'], ...links.map(l => [l.name, l.url])]))} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 text-xs font-bold px-3 py-2">

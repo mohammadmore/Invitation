@@ -186,7 +186,7 @@ export default function Dashboard({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-1.5">
         {(['7', '14', '30', 'all'] as Range[]).map(r => (
-          <button key={r} onClick={() => setRange(r)} className={`rounded-full px-3 py-1 text-xs font-bold ${range === r ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+          <button key={r} onClick={() => setRange(r)} className={`rounded-full px-3 py-1 text-xs font-bold ${range === r ? 'btn-ink' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
             {r === 'all' ? 'همه' : `${fa(Number(r))} روز اخیر`}
           </button>
         ))}

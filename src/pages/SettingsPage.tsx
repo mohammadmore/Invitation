@@ -4,11 +4,13 @@ import { CircleCheck, Home, Loader2, Lock, MessageSquareText, Save, Send, Triang
 import { api, getAdminPassword, setAdminPassword } from '../lib/api';
 import { route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
+import { ColorModeToggle, useAdminTheme } from '../lib/adminTheme';
 import { SMS_PROVIDERS, type SmsSettings } from '../shared/notify';
 import { Field, Section, TextArea, TextInput, Toggle } from '../builder/ui';
 
 /** System settings (admin): SMS panel used for attendance notifications. Nothing is hard-coded. */
 export default function SettingsPage() {
+  useAdminTheme(null);
   const [sms, setSms] = useState<SmsSettings | null>(null);
   const [sentToday, setSentToday] = useState(0);
   const [state, setState] = useState<'loading' | 'locked' | 'ready'>('loading');
@@ -31,7 +33,6 @@ export default function SettingsPage() {
   useEffect(() => {
     hideSplash();
     document.title = 'تنظیمات سامانه';
-    document.body.style.backgroundColor = '#f6f1fe';
     load();
   }, []);
 
@@ -84,7 +85,8 @@ export default function SettingsPage() {
           <a href={route()} className="p-2 -mr-2 rounded-xl hover:bg-white/60 text-slate-600" title="صفحه اصلی">
             <Home className="w-5 h-5" />
           </a>
-          <h1 className="font-black text-gradient-ad">تنظیمات سامانه</h1>
+          <h1 className="font-black text-gradient-ad flex-1">تنظیمات سامانه</h1>
+          <ColorModeToggle className="text-slate-600" />
         </div>
       </header>
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
@@ -189,7 +191,7 @@ export default function SettingsPage() {
           <Section title="ارسال آزمایشی" description="قبل از استفاده، با یک پیامک آزمایشی مطمئن شوید تنظیمات درست است. پاسخ پنل نمایش داده می‌شود.">
             <div className="flex flex-wrap gap-2">
               <TextInput ltr inputMode="tel" value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="0912…" className="max-w-xs" />
-              <button onClick={test} disabled={testing || !testTo} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white font-bold px-4 py-2.5 disabled:opacity-60">
+              <button onClick={test} disabled={testing || !testTo} className="inline-flex items-center gap-2 rounded-xl btn-ink font-bold px-4 py-2.5 disabled:opacity-60">
                 {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} ارسال آزمایشی
               </button>
             </div>

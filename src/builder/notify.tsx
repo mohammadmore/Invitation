@@ -150,7 +150,7 @@ export default function NotifySection({ recordId, rsvpEnabled, trackingHint }: {
                   setTesting(false);
                 }
               }}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2 disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-xl btn-ink text-xs font-bold px-3 py-2 disabled:opacity-60"
             >
               {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} ارسال اعلان آزمایشی
             </button>
