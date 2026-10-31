@@ -14,9 +14,21 @@ export default function TicketPage({ slug, code }: { slug: string; code: string 
 
   useEffect(() => {
     document.title = 'بلیت ورود به غرفه';
+    const key = `ticket-info:${slug}:${code}`;
     api
       .ticket(slug, code)
+      .catch(e => {
+        // Offline at the booth: show the copy saved the last time this ticket was opened.
+        const saved = localStorage.getItem(key);
+        if (saved) return JSON.parse(saved) as TicketInfo;
+        throw e;
+      })
       .then(info => {
+        try {
+          localStorage.setItem(key, JSON.stringify(info));
+        } catch {
+          /* ignore */
+        }
         setT(info);
         document.title = `بلیت ${info.company} — ${info.event}`;
         document.body.style.backgroundColor = info.theme.background;

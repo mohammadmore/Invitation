@@ -421,6 +421,8 @@ interface Rsvp {
   checkedInBy?: string;
   visits?: number;
   walkIn?: boolean;
+  /** Check-in operation that created this entry (walk-ins), for idempotent syncs */
+  opId?: string;
 }
 
 const cleanUtm = (v: unknown) => clean(v, 80);
@@ -466,7 +468,7 @@ function updateRsvps<T>(id: string, fn: (list: Rsvp[]) => T | Promise<T>): Promi
 
 const clean = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max) : '');
 
-api.post('/invitations/:slug/rsvp', limit('rsvp', 10, 3_600_000), express.json({ limit: '8kb' }), async (req, res) => {
+api.post('/invitations/:slug/rsvp', limit('rsvp', 30, 3_600_000), express.json({ limit: '8kb' }), async (req, res) => {
   const slug = req.params.slug.toLowerCase();
   const rec = await publishedRecord(slug);
   const config = rec?.published;
@@ -540,9 +542,10 @@ async function loadStats(id: string): Promise<StatsFile> {
 }
 const tehranDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date());
 const inc = (o: DayStats, k: string) => (o[k] = (o[k] ?? 0) + 1);
-async function bumpStat(id: string, type: string, link = '', utm = '') {
+async function bumpStat(id: string, type: string, link = '', utm = '', at?: Date) {
   const s = await loadStats(id);
-  const day = tehranDay();
+  // Offline check-ins are counted on the day they actually happened.
+  const day = at ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(at) : tehranDay();
   inc((s.days[day] ??= {}), type);
   if (link) inc(((s.links[link] ??= {})[day] ??= {}), type);
   if (utm) inc((s.utm[utm] ??= {}), type);
@@ -773,6 +776,7 @@ api.delete('/records/:id', async (req, res) => {
   await fs.rm(rsvpFile(rec.id), { force: true });
   await fs.rm(statsFile(rec.id), { force: true });
   await fs.rm(notifyFile(rec.id), { force: true });
+  await fs.rm(opsFile(rec.id), { force: true });
   statsCache.delete(rec.id);
   dirtyStats.delete(rec.id);
   for (const [slug, id] of slugIndex) if (id === rec.id) slugIndex.delete(slug);
@@ -1154,72 +1158,150 @@ api.get('/checkin/:id', limit('checkin', 600, 60_000), async (req, res) => {
   });
 });
 
-/** Check a guest in by ticket code (scanner) or RSVP id (manual search). Repeated scans count as return visits. */
-api.post('/checkin/:id/scan', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), async (req, res) => {
-  const rec = await staffRecord(req, res);
-  if (!rec) return;
-  const ticket = String(req.body?.ticket || '').toUpperCase();
-  const rsvpId = String(req.body?.rsvpId || '');
-  const staff = clean(req.body?.staff, 60);
-  const result = await updateRsvps(rec.id, list => {
-    const g = list.find(r => (ticket && r.ticket === ticket) || (rsvpId && r.id === rsvpId));
-    if (!g) return { status: 'notfound' as const };
-    const first = !g.checkedInAt;
-    if (first) {
-      g.checkedInAt = new Date().toISOString();
-      g.checkedInBy = staff;
+// Every staff action is an "operation" with a client-generated id. Operations made while the
+// booth was offline are queued on the phone and synced later; the id makes retries safe
+// (a lost response never double-counts), and the phone's timestamp is kept as the real time.
+
+interface CheckinOp {
+  opId: string;
+  type: 'scan' | 'walkin' | 'undo';
+  ticket?: string;
+  rsvpId?: string;
+  name?: string;
+  phone?: string;
+  org?: string;
+  count?: number;
+  staff?: string;
+  /** When it happened on the phone (ISO) */
+  at?: string;
+}
+interface OpResult {
+  opId: string;
+  status: 'ok' | 'already' | 'notfound' | 'undone' | 'duplicate' | 'invalid';
+  guest: CheckinGuest | null;
+}
+
+const OPS_DIR = path.join(DATA_DIR, 'checkin-ops');
+mkdirSync(OPS_DIR, { recursive: true });
+const opsFile = (id: string) => path.join(OPS_DIR, `${id}.json`);
+/** Arrival SMS only if the visit is recent – "your guest is at the booth" an hour later is misleading. */
+const ARRIVAL_SMS_MAX_AGE_MS = 45 * 60_000;
+
+/** Accept the phone's timestamp unless it is clearly wrong (future, or older than two weeks). */
+function opTime(at: unknown): Date {
+  const t = typeof at === 'string' ? Date.parse(at) : NaN;
+  const now = Date.now();
+  return Number.isFinite(t) && t <= now + 5 * 60_000 && t >= now - 14 * 86_400_000 ? new Date(Math.min(t, now)) : new Date(now);
+}
+
+async function processOps(rec: InvitationRecord, ops: CheckinOp[]): Promise<OpResult[]> {
+  const config = rec.published ?? rec.draft;
+  const sideEffects: (() => void)[] = [];
+  const results = await updateRsvps(rec.id, async list => {
+    let done: string[] = [];
+    try {
+      done = JSON.parse(await fs.readFile(opsFile(rec.id), 'utf8'));
+    } catch {
+      /* none yet */
     }
-    g.visits = (g.visits ?? 0) + 1;
-    return { status: first ? ('ok' as const) : ('already' as const), guest: { ...g } };
+    const seen = new Set(done);
+    const out: OpResult[] = [];
+    for (const op of ops) {
+      const opId = String(op.opId || '').slice(0, 64);
+      if (!/^[\w-]{8,64}$/.test(opId)) {
+        out.push({ opId, status: 'invalid', guest: null });
+        continue;
+      }
+      if (seen.has(opId)) {
+        // Already applied (response was lost): report the guest's current state.
+        const g = list.find(r => r.opId === opId || (op.ticket && r.ticket === String(op.ticket).toUpperCase()) || (op.rsvpId && r.id === op.rsvpId));
+        out.push({ opId, status: 'duplicate', guest: g ? toGuest(g) : null });
+        continue;
+      }
+      seen.add(opId);
+      done.push(opId);
+      const when = opTime(op.at);
+      const staff = clean(op.staff, 60);
+      if (op.type === 'walkin') {
+        const name = clean(op.name, 120);
+        if (!name) {
+          out.push({ opId, status: 'invalid', guest: null });
+          continue;
+        }
+        const entry: Rsvp = {
+          id: crypto.randomBytes(5).toString('hex'),
+          at: when.toISOString(),
+          name,
+          phone: clean(op.phone, 40),
+          org: clean(op.org, 120),
+          day: new Intl.DateTimeFormat('en-CA', { timeZone: config.event.timezone }).format(when),
+          count: Math.min(20, Math.max(1, Math.round(Number(op.count) || 1))),
+          guest: '',
+          lang: 'fa',
+          walkIn: true,
+          checkedInAt: when.toISOString(),
+          checkedInBy: staff,
+          visits: 1,
+          opId,
+        };
+        list.push(entry);
+        sideEffects.push(() => bumpStat(rec.id, 'walkin', '', '', when));
+        out.push({ opId, status: 'ok', guest: toGuest(entry) });
+        continue;
+      }
+      const ticket = String(op.ticket || '').toUpperCase();
+      const g = list.find(r => (ticket && r.ticket === ticket) || (op.rsvpId && r.id === op.rsvpId));
+      if (!g) {
+        out.push({ opId, status: 'notfound', guest: null });
+        continue;
+      }
+      if (op.type === 'undo') {
+        if (g.checkedInAt) {
+          delete g.checkedInAt;
+          delete g.checkedInBy;
+          g.visits = 0;
+        }
+        out.push({ opId, status: 'undone', guest: toGuest(g) });
+        continue;
+      }
+      const first = !g.checkedInAt;
+      if (first) {
+        g.checkedInAt = when.toISOString();
+        g.checkedInBy = staff;
+        const guest = { ...g };
+        sideEffects.push(() => {
+          bumpStat(rec.id, 'checkin', guest.link ?? '', guest.utm ?? '', when);
+          if (Date.now() - when.getTime() <= ARRIVAL_SMS_MAX_AGE_MS) sendArrivalSms(rec, guest).catch(console.error);
+        });
+      }
+      g.visits = (g.visits ?? 0) + 1;
+      out.push({ opId, status: first ? 'ok' : 'already', guest: toGuest(g) });
+    }
+    await fs.writeFile(opsFile(rec.id), JSON.stringify(done.slice(-5000)));
+    return out;
   });
-  if (result.status === 'ok' && result.guest) {
-    bumpStat(rec.id, 'checkin', result.guest.link ?? '', result.guest.utm ?? '');
-    sendArrivalSms(rec, result.guest).catch(console.error);
-  }
-  res.json({ status: result.status, guest: result.guest ? toGuest(result.guest) : null });
-});
+  sideEffects.forEach(f => f());
+  return results;
+}
 
-/** Undo a mistaken check-in. */
-api.post('/checkin/:id/undo', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), async (req, res) => {
+/** Batch endpoint used by the check-in page (online and when syncing an offline queue). */
+api.post('/checkin/:id/sync', limit('checkin', 600, 60_000), express.json({ limit: '256kb' }), async (req, res) => {
   const rec = await staffRecord(req, res);
   if (!rec) return;
-  const guest = await updateRsvps(rec.id, list => {
-    const g = list.find(r => r.id === String(req.body?.rsvpId || ''));
-    if (!g || !g.checkedInAt) return null;
-    delete g.checkedInAt;
-    delete g.checkedInBy;
-    g.visits = 0;
-    return { ...g };
-  });
-  res.status(guest ? 200 : 404).json({ guest: guest ? toGuest(guest) : null });
+  const ops = Array.isArray(req.body?.ops) ? (req.body.ops as CheckinOp[]).slice(0, 500) : [];
+  res.json({ results: await processOps(rec, ops) });
 });
 
-/** Visitor without a prior RSVP: registered and checked in on the spot. */
-api.post('/checkin/:id/walkin', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), async (req, res) => {
+// Single-action endpoints (kept for simple integrations): same processing as /sync.
+const singleOp = (type: CheckinOp['type']) => async (req: Request, res: Response) => {
   const rec = await staffRecord(req, res);
   if (!rec) return;
-  const name = clean(req.body?.name, 120);
-  if (!name) return res.status(400).json({ error: 'نام لازم است' });
-  const now = new Date().toISOString();
-  const entry: Rsvp = {
-    id: crypto.randomBytes(5).toString('hex'),
-    at: now,
-    name,
-    phone: clean(req.body?.phone, 40),
-    org: clean(req.body?.org, 120),
-    day: new Intl.DateTimeFormat('en-CA', { timeZone: (rec.published ?? rec.draft).event.timezone }).format(new Date()),
-    count: Math.min(20, Math.max(1, Math.round(Number(req.body?.count) || 1))),
-    guest: '',
-    lang: 'fa',
-    walkIn: true,
-    checkedInAt: now,
-    checkedInBy: clean(req.body?.staff, 60),
-    visits: 1,
-  };
-  await addRsvp(rec.id, entry);
-  bumpStat(rec.id, 'walkin');
-  res.status(201).json({ guest: toGuest(entry) });
-});
+  const [r] = await processOps(rec, [{ ...req.body, type, opId: req.body?.opId || crypto.randomUUID() }]);
+  res.status(r.status === 'invalid' ? 400 : 200).json({ status: r.status, guest: r.guest });
+};
+api.post('/checkin/:id/scan', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), singleOp('scan'));
+api.post('/checkin/:id/undo', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), singleOp('undo'));
+api.post('/checkin/:id/walkin', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), singleOp('walkin'));
 
 api.get('/records/:id/checkin', async (req, res) => {
   const rec = await editable(req, res);
@@ -1485,6 +1567,8 @@ async function start() {
     const dist = path.join(APP_ROOT, 'dist');
     if (!existsSync(path.join(dist, 'index.html'))) throw new Error(`${dist}/index.html not found – run \`npm run build\` first`);
     app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '365d', fallthrough: false }));
+    // The check-in service worker must always be revalidated so updates reach the booth phones.
+    app.get('/sw.js', (_req, res) => res.set({ 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': `${BASE_PATH}/checkin/` }).sendFile(path.join(dist, 'sw.js')));
     app.use(express.static(dist, { index: false, maxAge: '7d' }));
     const html = await fs.readFile(path.join(dist, 'index.html'), 'utf8');
     template = async () => html;
