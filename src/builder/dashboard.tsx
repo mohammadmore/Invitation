@@ -22,6 +22,7 @@ interface Row {
   enter: number;
   actions: number;
   rsvp: number;
+  checkin: number;
 }
 
 function sum(perDay: Record<string, DayCounters> | undefined, days: Set<string> | null, type: string): number {
@@ -80,6 +81,8 @@ export default function Dashboard({
   const details = total('details');
   const actions = ACTIONS.reduce((n, a) => n + total(a), 0);
   const rsvp = total('rsvp');
+  const checkin = total('checkin');
+  const walkin = scope === 'rep' ? 0 : total('walkin');
 
   // ---- per-link rows, then grouped
   const repName = (id: string) => reps.find(r => r.id === id)?.name || '';
@@ -94,7 +97,7 @@ export default function Dashboard({
       return {
         key,
         label: referral ? `${base} — ارجاع` : base,
-        sub: code === '_' ? '' : `/${code}${link && !link.active ? ' · غیرفعال' : ''}`,
+        sub: code === '_' ? '' : `/${code}${link && !link.active ? ' — غیرفعال' : ''}`,
         repId: link?.repId ?? '',
         channel: code === '_' ? '' : (link?.channel ?? ''),
         referral,
@@ -103,6 +106,7 @@ export default function Dashboard({
         enter: sum(per, daySet, 'enter'),
         actions: ACTIONS.reduce((n, a) => n + sum(per, daySet, a), 0),
         rsvp: sum(per, daySet, 'rsvp'),
+        checkin: sum(per, daySet, 'checkin'),
       };
     });
   }, [stats, links, daySet]);
@@ -117,12 +121,13 @@ export default function Dashboard({
           : groupBy === 'channel'
             ? [r.channel || '-', r.channel ? channelLabel(r.channel) : 'لینک اصلی']
             : [r.referral ? 'ref' : 'direct', r.referral ? 'ارجاع (اشتراک مهمانان)' : 'مستقیم از لینک'];
-      const g = groups.get(key) ?? { key, label, sub: '', view: 0, unique: 0, enter: 0, actions: 0, rsvp: 0 };
+      const g = groups.get(key) ?? { key, label, sub: '', view: 0, unique: 0, enter: 0, actions: 0, rsvp: 0, checkin: 0 };
       g.view += r.view;
       g.unique += r.unique;
       g.enter += r.enter;
       g.actions += r.actions;
       g.rsvp += r.rsvp;
+      g.checkin += r.checkin;
       groups.set(key, g);
     }
     return [...groups.values()];
@@ -174,6 +179,7 @@ export default function Dashboard({
     ['مشاهده زمان و مکان', details],
     ['اقدام (تقویم، مسیر، تماس…)', actions],
     ['اعلام حضور', rsvp],
+    ...(checkin ? ([['حضور در غرفه', checkin]] as [string, number][]) : []),
   ];
 
   return (
@@ -195,6 +201,13 @@ export default function Dashboard({
           ['اعلام حضور', fa(rsvp)],
           ['نرخ تبدیل (حضور ÷ یکتا)', pct(rsvp, unique)],
           ['نرخ ورود', pct(enter, unique)],
+          ...(checkin || walkin
+            ? [
+                ['حضور واقعی در غرفه', fa(checkin)],
+                ['نرخ آمدن (غرفه ÷ اعلام حضور)', pct(checkin, rsvp)],
+                ['بدون اعلام قبلی', fa(walkin)],
+              ]
+            : []),
         ].map(([label, value]) => (
           <div key={label} className="rounded-2xl bg-slate-50 p-3">
             <p className="text-xl font-black text-slate-900 tabular-nums">{value}</p>
@@ -251,8 +264,8 @@ export default function Dashboard({
                 downloadCsv(
                   `report-${groupBy}.csv`,
                   toCsv([
-                    ['عنوان', 'کد', 'بازدید', 'یکتا', 'ورود', 'اقدام', 'اعلام حضور', 'نرخ تبدیل'],
-                    ...sorted.map(r => [r.label, r.sub, r.view, r.unique, r.enter, r.actions, r.rsvp, r.unique ? `${((r.rsvp / r.unique) * 100).toFixed(1)}%` : '']),
+                    ['عنوان', 'کد', 'بازدید', 'یکتا', 'ورود', 'اقدام', 'اعلام حضور', 'حضور در غرفه', 'نرخ تبدیل'],
+                    ...sorted.map(r => [r.label, r.sub, r.view, r.unique, r.enter, r.actions, r.rsvp, r.checkin, r.unique ? `${((r.rsvp / r.unique) * 100).toFixed(1)}%` : '']),
                   ]),
                 )
               }
@@ -275,7 +288,8 @@ export default function Dashboard({
                   {header('unique', 'یکتا')}
                   {header('enter', 'ورود')}
                   {header('actions', 'اقدام')}
-                  {header('rsvp', 'حضور')}
+                  {header('rsvp', 'اعلام')}
+                  {header('checkin', 'غرفه')}
                   {header('conv', 'تبدیل')}
                 </tr>
               </thead>
@@ -299,6 +313,7 @@ export default function Dashboard({
                     <td className="p-2">{fa(r.enter)}</td>
                     <td className="p-2">{fa(r.actions)}</td>
                     <td className="p-2">{fa(r.rsvp)}</td>
+                    <td className="p-2">{fa(r.checkin)}</td>
                     <td className="p-2 font-bold text-slate-800">{pct(r.rsvp, r.unique)}</td>
                   </tr>
                 ))}

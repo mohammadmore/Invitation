@@ -3,6 +3,7 @@ import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, VIDEO_WARN_MB, type UploadKind } 
 import { apiUrl } from './paths';
 import type { PublicLinkInfo, PublicTracking, Tracking, TrackedLink } from '../shared/tracking';
 import type { NotifyLogEntry, NotifySettings, SmsSettings } from '../shared/notify';
+import type { CheckinGuest, CheckinSettings, ScanStatus, TicketInfo } from '../shared/checkin';
 
 export { inviteUrl, editUrl } from './paths';
 export type { UploadKind };
@@ -126,6 +127,11 @@ export interface Rsvp {
   via?: string;
   referral?: boolean;
   utm?: string;
+  ticket?: string;
+  checkedInAt?: string;
+  checkedInBy?: string;
+  visits?: number;
+  walkIn?: boolean;
 }
 
 export type DayCounters = Record<string, number>;
@@ -161,7 +167,18 @@ export const api = {
   preview: (id: string, token: string) => request<{ config: InvitationConfig; published: boolean; updatedAt: string; revision: number }>('GET', `preview/${encodeURIComponent(id)}?k=${encodeURIComponent(token)}`),
   sendFeedback: (id: string, token: string, body: { name: string; message: string; approved: boolean; revision: number }) =>
     request<{ ok: boolean }>('POST', `preview/${encodeURIComponent(id)}/feedback?k=${encodeURIComponent(token)}`, body),
-  rsvp: (slug: string, body: { name: string; phone: string; org: string; day: string; count: number; guest: string; lang: Lang; link?: string; via?: string; utm?: string }) => request<{ ok: boolean }>('POST', `invitations/${encodeURIComponent(slug)}/rsvp`, body),
+  rsvp: (slug: string, body: { name: string; phone: string; org: string; day: string; count: number; guest: string; lang: Lang; link?: string; via?: string; utm?: string }) =>
+    request<{ ok: boolean; ticket: string }>('POST', `invitations/${encodeURIComponent(slug)}/rsvp`, body),
+  ticket: (slug: string, code: string) => request<TicketInfo>('GET', `invitations/${encodeURIComponent(slug)}/ticket/${encodeURIComponent(code)}`),
+  checkinList: (id: string, k: string) =>
+    request<{ company: string; event: string; startDate: string; endDate: string; timezone: string; guests: CheckinGuest[] }>('GET', `checkin/${encodeURIComponent(id)}?k=${encodeURIComponent(k)}`),
+  checkinScan: (id: string, k: string, body: { ticket?: string; rsvpId?: string; staff: string }) =>
+    request<{ status: ScanStatus; guest: CheckinGuest | null }>('POST', `checkin/${encodeURIComponent(id)}/scan?k=${encodeURIComponent(k)}`, body),
+  checkinUndo: (id: string, k: string, rsvpId: string) => request<{ guest: CheckinGuest | null }>('POST', `checkin/${encodeURIComponent(id)}/undo?k=${encodeURIComponent(k)}`, { rsvpId }),
+  checkinWalkin: (id: string, k: string, body: { name: string; phone: string; org: string; count: number; staff: string }) =>
+    request<{ guest: CheckinGuest }>('POST', `checkin/${encodeURIComponent(id)}/walkin?k=${encodeURIComponent(k)}`, body),
+  checkinSettings: (id: string) => request<CheckinSettings>('GET', `records/${encodeURIComponent(id)}/checkin`),
+  saveCheckinSettings: (id: string, checkin: CheckinSettings, renewToken = false) => request<CheckinSettings>('PUT', `records/${encodeURIComponent(id)}/checkin`, { checkin, renewToken }),
   list: () => request<RecordSummary[]>('GET', 'records'),
   getRecord: (id: string) => request<RecordView>('GET', `records/${encodeURIComponent(id)}`),
   createRecord: (config: InvitationConfig) => request<RecordView & { editToken: string; slugConflict: boolean }>('POST', 'records', { config }),

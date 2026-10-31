@@ -90,8 +90,10 @@ export interface InvitationViewProps {
   forcedLang?: Lang;
   /** Analytics hook (published invitations only) */
   onEvent?: (type: string) => void;
-  /** Send an attendance confirmation; absent in previews (nothing is stored there) */
-  onRsvp?: (data: RsvpData) => Promise<void>;
+  /** Send an attendance confirmation; absent in previews (nothing is stored there). Resolves to a ticket code when check-in is on. */
+  onRsvp?: (data: RsvpData) => Promise<string | void>;
+  /** URL of a ticket page for a code (published invitations) */
+  ticketUrlOf?: (code: string) => string;
   /** Tracked link this page was opened with (multi-link mode) */
   link?: PublicLinkInfo | null;
   /** Show the "your sales rep" card on rep links */
@@ -157,6 +159,7 @@ export default function InvitationView({
   link = null,
   repCard = true,
   showCompanyContact = true,
+  ticketUrlOf,
 }: InvitationViewProps) {
   const rep = repCard ? (link?.rep ?? null) : null;
   const repName = link?.rep?.name ?? '';
@@ -181,6 +184,10 @@ export default function InvitationView({
   const rsvpKey = `rsvp-done:${config.slug}`;
   const [rsvpOpen, setRsvpOpen] = useState(false);
   const [rsvpDone, setRsvpDone] = useState(() => !embedded && typeof localStorage !== 'undefined' && !!localStorage.getItem(rsvpKey));
+  /** Booth ticket received after RSVP (kept on this device) */
+  const ticketKey = `ticket:${config.slug}`;
+  const [ticket, setTicket] = useState(() => (!embedded && typeof localStorage !== 'undefined' ? localStorage.getItem(ticketKey) || '' : ''));
+  const [ticketOpen, setTicketOpen] = useState(false);
   const hasMap = ready('boothMap');
   const [step, setStep] = useState(1);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -734,11 +741,11 @@ export default function InvitationView({
                 {miss('boothMap') && <Missing text={ITEMS.boothMap.missing} className="py-3 mb-2" />}
                 {config.rsvp.enabled && !ended && (
                   <button
-                    onClick={() => !rsvpDone && setRsvpOpen(true)}
+                    onClick={() => (rsvpDone ? ticket && setTicketOpen(true) : setRsvpOpen(true))}
                     className={`flex items-center justify-center gap-2 w-full py-3 @2xl:py-4 px-6 rounded-2xl font-black shadow-lg transition-all mb-1 ${rsvpDone ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-(--c-primary-ink) border border-white hover:-translate-y-0.5'}`}
                   >
                     <CircleCheck className="w-5 h-5" />
-                    {rsvpDone ? T.rsvpDone : T.rsvp}
+                    {rsvpDone ? (ticket ? T.showTicket : T.rsvpDone) : T.rsvp}
                   </button>
                 )}
                 {hasMap && (
@@ -912,13 +919,20 @@ export default function InvitationView({
                 showToast(isEn ? 'Preview only — nothing was saved' : 'در پیش‌نمایش ثبت نمی‌شود');
                 return;
               }
-              await onRsvp(data);
+              const code = await onRsvp(data);
               localStorage.setItem(rsvpKey, '1');
               setRsvpDone(true);
               setRsvpOpen(false);
-              showToast(T.thanks);
+              if (code) {
+                localStorage.setItem(ticketKey, code);
+                setTicket(code);
+                setTicketOpen(true);
+              } else showToast(T.thanks);
             }}
           />
+        )}
+        {ticketOpen && ticket && (
+          <TicketModal key="ticket" T={T} code={ticket} url={ticketUrlOf?.(ticket) ?? ''} embedded={embedded} guestName={guestName} onClose={() => setTicketOpen(false)} />
         )}
         {toast && (
           <motion.div dir="auto" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className={`${embedded ? 'absolute' : 'fixed'} bottom-6 left-1/2 -translate-x-1/2 z-[160] bg-slate-900/90 text-white text-sm font-bold px-4 py-2.5 rounded-2xl shadow-xl w-max max-w-[90%] text-center`}>
@@ -1033,6 +1047,39 @@ function RsvpForm({
           {T.submit}
         </button>
       </motion.form>
+    </motion.div>
+  );
+}
+
+/** Ticket shown right after RSVP: QR of the ticket page + the readable code. */
+function TicketModal({ T, code, url, embedded, guestName, onClose }: { T: ReturnType<typeof strings>; code: string; url: string; embedded: boolean; guestName: string; onClose: () => void }) {
+  const [qr, setQr] = useState('');
+  useEffect(() => {
+    import('qrcode')
+      .then(QR => QR.toDataURL(url || code, { width: 480, margin: 1, errorCorrectionLevel: 'M' }))
+      .then(setQr)
+      .catch(() => {});
+  }, [url, code]);
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className={`${embedded ? 'absolute' : 'fixed'} inset-0 z-[155] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4`} onClick={onClose}>
+      <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} onClick={e => e.stopPropagation()} className="w-full max-w-xs bg-white rounded-3xl shadow-2xl p-5 text-center text-slate-800 space-y-3">
+        <p className="font-black text-lg text-(--c-primary-ink)">{T.ticketTitle}</p>
+        <p className="text-sm font-bold text-emerald-700">{T.thanks}</p>
+        {guestName && <p className="text-sm font-bold">{guestName}</p>}
+        <div className="mx-auto w-52 h-52 rounded-2xl border border-slate-200 flex items-center justify-center bg-white">{qr ? <img src={qr} alt="QR" className="w-full h-full p-2" /> : null}</div>
+        <p dir="ltr" className="font-mono font-black text-2xl tracking-[0.3em] text-slate-900">
+          {code.slice(0, 4)}-{code.slice(4)}
+        </p>
+        <p className="text-[11px] text-slate-500 leading-relaxed">{T.ticketHint}</p>
+        {url && (
+          <a href={url} target="_blank" rel="noopener noreferrer" className="block text-xs font-bold text-(--c-accent-ink) underline">
+            {T.openTicket}
+          </a>
+        )}
+        <button onClick={onClose} className="w-full rounded-2xl py-2.5 font-black text-white animate-gradient-btn">
+          {T.close}
+        </button>
+      </motion.div>
     </motion.div>
   );
 }

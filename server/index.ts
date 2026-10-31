@@ -36,6 +36,7 @@ import {
   type SmsSettings,
 } from '../src/shared/notify';
 import { sendSms } from './sms';
+import { newTicketCode, sanitizeCheckin, TICKET_RE, type CheckinGuest, type CheckinSettings, type TicketInfo } from '../src/shared/checkin';
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, type UploadKind } from '../src/shared/uploads';
 
 // Node 18 has no global WebCrypto by default; shared code (src/shared/tracking.ts) uses it.
@@ -111,6 +112,8 @@ interface InvitationRecord {
   tracking: Tracking;
   /** SMS notification rules for attendance confirmations – live */
   notify: NotifySettings;
+  /** Booth check-in (tickets + staff scanner) – live */
+  checkin: CheckinSettings;
 }
 
 interface Snapshot {
@@ -151,7 +154,7 @@ async function readRecord(id: string): Promise<InvitationRecord | null> {
     if (!raw.draft && raw.config) {
       // Migrate the earlier format ({ config, editTokenHash }): it was published.
       const config = sanitizeInvitation(raw.config);
-      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt, revision: 1, history: [], feedback: [], tracking: emptyTracking(), notify: { ...DEFAULT_NOTIFY } };
+      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt, revision: 1, history: [], feedback: [], tracking: emptyTracking(), notify: { ...DEFAULT_NOTIFY }, checkin: sanitizeCheckin({}, newToken) };
     }
     raw.draft = sanitizeInvitation(raw.draft);
     raw.published = raw.published ? sanitizeInvitation(raw.published) : null;
@@ -160,6 +163,7 @@ async function readRecord(id: string): Promise<InvitationRecord | null> {
     raw.feedback = Array.isArray(raw.feedback) ? raw.feedback : [];
     raw.tracking = raw.tracking ? sanitizeTracking(raw.tracking) : emptyTracking();
     raw.notify = sanitizeNotify(raw.notify);
+    raw.checkin = sanitizeCheckin(raw.checkin, newToken);
     return raw;
   } catch {
     return null;
@@ -411,6 +415,12 @@ interface Rsvp {
   via?: string;
   referral?: boolean;
   utm?: string;
+  /** Booth check-in */
+  ticket?: string;
+  checkedInAt?: string;
+  checkedInBy?: string;
+  visits?: number;
+  walkIn?: boolean;
 }
 
 const cleanUtm = (v: unknown) => clean(v, 80);
@@ -437,6 +447,18 @@ function addRsvp(id: string, entry: Rsvp) {
     const list = await readRsvps(id);
     list.push(entry);
     await fs.writeFile(rsvpFile(id), JSON.stringify(list, null, 2));
+  });
+  rsvpLock = run.catch(() => {});
+  return run;
+}
+
+/** Read-modify-write the RSVP list under the same lock as additions. */
+function updateRsvps<T>(id: string, fn: (list: Rsvp[]) => T | Promise<T>): Promise<T> {
+  const run = rsvpLock.then(async () => {
+    const list = await readRsvps(id);
+    const out = await fn(list);
+    await fs.writeFile(rsvpFile(id), JSON.stringify(list, null, 2));
+    return out;
   });
   rsvpLock = run.catch(() => {});
   return run;
@@ -479,15 +501,17 @@ api.post('/invitations/:slug/rsvp', limit('rsvp', 10, 3_600_000), express.json({
         }
       : {}),
   };
+  if (rec.checkin.enabled) entry.ticket = newTicketCode(new Set((await readRsvps(rec.id)).map(r => r.ticket ?? '')));
   await addRsvp(rec.id, entry);
   bumpStat(rec.id, 'rsvp', attrKey, entry.utm);
   notifyRsvp(rec, config, entry, repOf, link).catch(console.error);
-  res.status(201).json({ ok: true });
+  if (entry.ticket) sendTicketSms(rec, config, entry, `${publicBase(req)}/${slug}/t/${entry.ticket}`).catch(console.error);
+  res.status(201).json({ ok: true, ticket: entry.ticket ?? '' });
 });
 
 // ----- visit statistics (aggregated counters only – no IPs or personal data)
 
-const STAT_TYPES = new Set(['view', 'unique', 'linkUnique', 'enter', 'details', 'gcal', 'ics', 'map', 'boothMap', 'share', 'contact', 'vcard', 'rsvp', 'personal', 'en']);
+const STAT_TYPES = new Set(['checkin', 'walkin', 'view', 'unique', 'linkUnique', 'enter', 'details', 'gcal', 'ics', 'map', 'boothMap', 'share', 'contact', 'vcard', 'rsvp', 'personal', 'en']);
 type DayStats = Record<string, number>;
 /** days: totals per day · links: per link key per day · utm: per "source / campaign" totals */
 interface StatsFile {
@@ -657,7 +681,7 @@ api.post('/records', limit('create', 60, 3_600_000), json, async (req, res) => {
   const now = new Date().toISOString();
   const result = await withSlugLock(async () => {
     const { draft, slugConflict } = applyDraft(req, null, req.body?.config);
-    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking: emptyTracking(), notify: { ...DEFAULT_NOTIFY } };
+    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking: emptyTracking(), notify: { ...DEFAULT_NOTIFY }, checkin: sanitizeCheckin({}, newToken) };
     await writeRecord(rec);
     return { rec, slugConflict };
   });
@@ -819,7 +843,9 @@ api.post('/records/:id/duplicate', limit('create', 60, 3_600_000), json, async (
   // Same organiser → keep its sales reps, links and tracking options (new report tokens).
   const tracking = mode === 'newEvent' ? sanitizeTracking({ ...rec.tracking, reps: rec.tracking.reps.map(r => ({ ...r, reportToken: '' })) }) : emptyTracking();
   const notify = mode === 'newEvent' ? rec.notify : { ...DEFAULT_NOTIFY };
-  const copy: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking, notify };
+  // Check-in options carry over for the same organiser, but always with a new staff link.
+  const checkin = sanitizeCheckin(mode === 'newEvent' ? { ...rec.checkin, staffToken: '' } : {}, newToken);
+  const copy: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking, notify, checkin };
   await writeRecord(copy);
   res.status(201).json({ ...(await recordView(copy)), editToken });
 });
@@ -979,14 +1005,56 @@ async function notifyRsvp(rec: InvitationRecord, config: InvitationConfig, entry
     event: config.event.title,
     company: config.company.name,
     rep: rep?.name || 'شرکت',
-    source: link ? `${link.label || link.code} (${channelLabel(link.channel)})${entry.referral ? ' · ارجاع' : ''}` : 'لینک اصلی',
+    source: link ? `${link.label || link.code} (${channelLabel(link.channel)})${entry.referral ? '، ارجاع' : ''}` : 'لینک اصلی',
   });
-  const log: NotifyLogEntry = { id: entry.id, at: new Date().toISOString(), to: [...to], message, status: 'pending', attempts: 0, detail: '' };
-  if (smsSettings.provider === 'none') return upsertNotifyLog(rec.id, { ...log, status: 'skipped', detail: 'پنل پیامک در تنظیمات سامانه تنظیم نشده است.' });
-  if (!to.size) return upsertNotifyLog(rec.id, { ...log, status: 'skipped', detail: rep ? 'کارشناس شماره موبایل معتبر ندارد و شماره دیگری هم تعیین نشده است.' : 'گیرنده‌ای تعیین نشده است.' });
-  if (hit(`sms:${rec.id}`, 3_600_000) > PER_INVITATION_HOURLY) return upsertNotifyLog(rec.id, { ...log, status: 'skipped', detail: 'سقف ساعتی اعلان این دعوتنامه پر شده است.' });
-  await upsertNotifyLog(rec.id, log);
-  await deliver(rec.id, log);
+  await queueSms(rec.id, entry.id, to, message, rep ? 'کارشناس شماره موبایل معتبر ندارد و شماره دیگری هم تعیین نشده است.' : 'گیرنده‌ای تعیین نشده است.');
+}
+
+/** Log + send one notification SMS (checks panel, recipients and the hourly cap). */
+async function queueSms(recordId: string, logId: string, to: Set<string>, message: string, noRecipientReason = 'گیرنده‌ای تعیین نشده است.') {
+  const log: NotifyLogEntry = { id: logId, at: new Date().toISOString(), to: [...to], message, status: 'pending', attempts: 0, detail: '' };
+  if (smsSettings.provider === 'none') return upsertNotifyLog(recordId, { ...log, status: 'skipped', detail: 'پنل پیامک در تنظیمات سامانه تنظیم نشده است.' });
+  if (!to.size) return upsertNotifyLog(recordId, { ...log, status: 'skipped', detail: noRecipientReason });
+  if (hit(`sms:${recordId}`, 3_600_000) > PER_INVITATION_HOURLY) return upsertNotifyLog(recordId, { ...log, status: 'skipped', detail: 'سقف ساعتی اعلان این دعوتنامه پر شده است.' });
+  await upsertNotifyLog(recordId, log);
+  await deliver(recordId, log);
+}
+
+/** Guest's own ticket link by SMS (if enabled and they gave a mobile number). */
+async function sendTicketSms(rec: InvitationRecord, config: InvitationConfig, entry: Rsvp, url: string) {
+  if (!rec.checkin.smsTicket) return;
+  const m = formatMobile(entry.phone, smsSettings.numberFormat);
+  if (!m) return;
+  const message = renderTemplate(rec.checkin.smsTicketTemplate, { guest: entry.name, company: config.company.name, event: config.event.title, link: url, code: entry.ticket ?? '' });
+  await queueSms(rec.id, `ticket-${entry.id}`, new Set([m]), message);
+}
+
+/** "Your guest is at the booth" SMS to the rep (and optionally the fixed numbers). */
+async function sendArrivalSms(rec: InvitationRecord, guest: Rsvp) {
+  const c = rec.checkin;
+  if (!c.notifyRep && !c.notifyExtra) return;
+  const fmt = smsSettings.numberFormat;
+  const to = new Set<string>();
+  const rep = guest.repId ? rec.tracking.reps.find(r => r.id === guest.repId) : undefined;
+  if (c.notifyRep && rep) {
+    const m = formatMobile(rep.phone, fmt) || formatMobile(rep.whatsapp, fmt);
+    if (m) to.add(m);
+  }
+  if (c.notifyExtra) for (const m of parseNumbers(rec.notify.extraNumbers, fmt)) to.add(m);
+  if (!to.size) return; // nobody to tell (e.g. guest of the company link) – not worth a log line
+  const config = rec.published ?? rec.draft;
+  const time = new Intl.DateTimeFormat('fa-IR', { timeZone: config.event.timezone, hour: '2-digit', minute: '2-digit' }).format(new Date());
+  const message = renderTemplate(c.arrivalTemplate, {
+    guest: guest.name,
+    org: guest.org ? ` — ${guest.org}` : '',
+    phone: guest.phone || '—',
+    count: guest.count.toLocaleString('fa-IR'),
+    time,
+    company: config.company.name,
+    event: config.event.title,
+    rep: rep?.name ?? '',
+  });
+  await queueSms(rec.id, `arrive-${guest.id}-${Date.now().toString(36)}`, to, message);
 }
 
 api.get('/records/:id/notify', async (req, res) => {
@@ -1016,6 +1084,160 @@ api.post('/records/:id/notify/test', limit('smstest', 20, 3_600_000), async (req
   const sample: Rsvp = { id: `test-${crypto.randomBytes(3).toString('hex')}`, at: new Date().toISOString(), name: 'مهمان آزمایشی', phone: '09120000000', org: 'شرکت نمونه', day: config.event.startDate, count: 2, guest: '', lang: 'fa' };
   await notifyRsvp({ ...rec, notify: { ...rec.notify, enabled: true } }, config, sample, rec.notify.toRep ? rep : undefined, rec.tracking.links.find(l => l.repId === rep?.id));
   res.json({ log: await readNotifyLog(rec.id) });
+});
+
+// ----- booth check-in
+
+/** Guest's ticket page data (anyone with the 8-character code). */
+api.get('/invitations/:slug/ticket/:code', limit('ticket', 120, 60_000), async (req, res) => {
+  const rec = await publishedRecord(req.params.slug.toLowerCase());
+  const code = req.params.code.toUpperCase();
+  if (!rec || !TICKET_RE.test(code)) return res.status(404).json({ error: 'بلیت پیدا نشد' });
+  const r = (await readRsvps(rec.id)).find(x => x.ticket === code);
+  if (!r) return res.status(404).json({ error: 'بلیت پیدا نشد' });
+  const c = publicVersion(rec.published!);
+  const info: TicketInfo = {
+    code,
+    name: r.name,
+    org: r.org,
+    day: r.day,
+    count: r.count,
+    checkedInAt: r.checkedInAt ?? '',
+    company: c.company.name,
+    event: c.event.title,
+    location: c.hidden.location ? '' : c.event.location,
+    booth: c.hidden.booth ? '' : c.event.booth,
+    dateLabel: c.hidden.date ? '' : c.event.dateLabel,
+    theme: { primary: c.theme.primary, accent: c.theme.accent, background: c.theme.background },
+    logo: c.hidden.logo ? '' : c.company.logo,
+  };
+  res.set('Cache-Control', 'no-store').json(info);
+});
+
+/** Staff access: check-in enabled + the staff token from the check-in link. */
+async function staffRecord(req: Request, res: Response): Promise<InvitationRecord | null> {
+  const rec = await readRecord(req.params.id);
+  if (!rec || !rec.checkin.enabled || !safeEqual(String(req.query.k || ''), rec.checkin.staffToken)) {
+    res.status(404).json({ error: 'صفحه ثبت حضور در دسترس نیست' });
+    return null;
+  }
+  return rec;
+}
+
+const toGuest = (r: Rsvp): CheckinGuest => ({
+  id: r.id,
+  name: r.name,
+  org: r.org,
+  phone: r.phone,
+  day: r.day,
+  count: r.count,
+  ticket: r.ticket ?? '',
+  repName: r.repName ?? '',
+  channel: r.channel ?? '',
+  walkIn: !!r.walkIn,
+  checkedInAt: r.checkedInAt ?? '',
+  checkedInBy: r.checkedInBy ?? '',
+  visits: r.visits ?? 0,
+});
+
+api.get('/checkin/:id', limit('checkin', 600, 60_000), async (req, res) => {
+  const rec = await staffRecord(req, res);
+  if (!rec) return;
+  const c = rec.published ?? rec.draft;
+  res.set('Cache-Control', 'no-store').json({
+    company: c.company.name,
+    event: c.event.title,
+    startDate: c.event.startDate,
+    endDate: c.event.endDate,
+    timezone: c.event.timezone,
+    guests: (await readRsvps(rec.id)).map(toGuest),
+  });
+});
+
+/** Check a guest in by ticket code (scanner) or RSVP id (manual search). Repeated scans count as return visits. */
+api.post('/checkin/:id/scan', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), async (req, res) => {
+  const rec = await staffRecord(req, res);
+  if (!rec) return;
+  const ticket = String(req.body?.ticket || '').toUpperCase();
+  const rsvpId = String(req.body?.rsvpId || '');
+  const staff = clean(req.body?.staff, 60);
+  const result = await updateRsvps(rec.id, list => {
+    const g = list.find(r => (ticket && r.ticket === ticket) || (rsvpId && r.id === rsvpId));
+    if (!g) return { status: 'notfound' as const };
+    const first = !g.checkedInAt;
+    if (first) {
+      g.checkedInAt = new Date().toISOString();
+      g.checkedInBy = staff;
+    }
+    g.visits = (g.visits ?? 0) + 1;
+    return { status: first ? ('ok' as const) : ('already' as const), guest: { ...g } };
+  });
+  if (result.status === 'ok' && result.guest) {
+    bumpStat(rec.id, 'checkin', result.guest.link ?? '', result.guest.utm ?? '');
+    sendArrivalSms(rec, result.guest).catch(console.error);
+  }
+  res.json({ status: result.status, guest: result.guest ? toGuest(result.guest) : null });
+});
+
+/** Undo a mistaken check-in. */
+api.post('/checkin/:id/undo', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), async (req, res) => {
+  const rec = await staffRecord(req, res);
+  if (!rec) return;
+  const guest = await updateRsvps(rec.id, list => {
+    const g = list.find(r => r.id === String(req.body?.rsvpId || ''));
+    if (!g || !g.checkedInAt) return null;
+    delete g.checkedInAt;
+    delete g.checkedInBy;
+    g.visits = 0;
+    return { ...g };
+  });
+  res.status(guest ? 200 : 404).json({ guest: guest ? toGuest(guest) : null });
+});
+
+/** Visitor without a prior RSVP: registered and checked in on the spot. */
+api.post('/checkin/:id/walkin', limit('checkin', 600, 60_000), express.json({ limit: '4kb' }), async (req, res) => {
+  const rec = await staffRecord(req, res);
+  if (!rec) return;
+  const name = clean(req.body?.name, 120);
+  if (!name) return res.status(400).json({ error: 'نام لازم است' });
+  const now = new Date().toISOString();
+  const entry: Rsvp = {
+    id: crypto.randomBytes(5).toString('hex'),
+    at: now,
+    name,
+    phone: clean(req.body?.phone, 40),
+    org: clean(req.body?.org, 120),
+    day: new Intl.DateTimeFormat('en-CA', { timeZone: (rec.published ?? rec.draft).event.timezone }).format(new Date()),
+    count: Math.min(20, Math.max(1, Math.round(Number(req.body?.count) || 1))),
+    guest: '',
+    lang: 'fa',
+    walkIn: true,
+    checkedInAt: now,
+    checkedInBy: clean(req.body?.staff, 60),
+    visits: 1,
+  };
+  await addRsvp(rec.id, entry);
+  bumpStat(rec.id, 'walkin');
+  res.status(201).json({ guest: toGuest(entry) });
+});
+
+api.get('/records/:id/checkin', async (req, res) => {
+  const rec = await editable(req, res);
+  if (!rec) return;
+  res.set('Cache-Control', 'no-store').json(rec.checkin);
+});
+
+api.put('/records/:id/checkin', express.json({ limit: '16kb' }), async (req, res) => {
+  const out = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return { status: 404, body: { error: 'دعوتنامه پیدا نشد' } };
+    if (!canEdit(req, rec)) return { status: 401, body: { error: 'اجازه ویرایش این دعوتنامه را ندارید' } };
+    // The staff token only changes through the explicit "new link" action.
+    const checkin = sanitizeCheckin({ ...req.body?.checkin, staffToken: req.body?.renewToken ? '' : rec.checkin.staffToken }, newToken);
+    await writeRecord({ ...rec, checkin, updatedAt: new Date().toISOString() });
+    return { status: 200, body: checkin };
+  });
+  res.status(out.status).json(out.body);
 });
 
 // ----- links & sales reps (live settings, effective immediately)
@@ -1182,10 +1404,13 @@ async function renderPage(html: string, req: Request): Promise<{ status: number;
   const rel = relPath(req);
   if (!rel || rel === 'builder' || rel.startsWith('builder/')) return { status: 200, html };
   if (rel.startsWith('preview/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
+  if (rel.startsWith('checkin/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
   if (rel === 'settings') return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
   if (rel.startsWith('rep/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
   const parts = rel.split('/');
   // <slug>/<link code>: tracked link of a published invitation
+  const isTicket = parts.length === 3 && parts[1] === 't' && TICKET_RE.test(parts[2].toUpperCase());
+  if (isTicket) parts.length = 1;
   if (parts.length > 2 || (parts.length === 2 && !CODE_RE.test(parts[1].toLowerCase()))) return { status: 404, html };
   const slug = decodeURIComponent(parts[0]).toLowerCase();
   const c = await publishedBySlug(slug);

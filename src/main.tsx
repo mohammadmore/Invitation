@@ -11,6 +11,8 @@ const BuilderPage = lazy(() => import('./pages/BuilderPage'));
 const PreviewPage = lazy(() => import('./pages/PreviewPage'));
 const RepReportPage = lazy(() => import('./pages/RepReportPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const TicketPage = lazy(() => import('./pages/TicketPage'));
+const CheckinPage = lazy(() => import('./pages/CheckinPage'));
 
 function Router() {
   const path = appPath();
@@ -19,6 +21,8 @@ function Router() {
   if (path === 'settings') return <SettingsPage />;
   if ((m = path.match(/^builder\/([^/]+)$/))) return <BuilderPage recordId={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^preview\/([^/]+)$/))) return <PreviewPage id={decodeURIComponent(m[1]).toLowerCase()} />;
+  if ((m = path.match(/^checkin\/([^/]+)$/))) return <CheckinPage id={decodeURIComponent(m[1]).toLowerCase()} />;
+  if ((m = path.match(/^([^/]+)\/t\/([^/]+)$/))) return <TicketPage slug={decodeURIComponent(m[1]).toLowerCase()} code={decodeURIComponent(m[2]).toUpperCase()} />;
   if ((m = path.match(/^rep\/([^/]+)$/))) return <RepReportPage id={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^([^/]+)$/))) return <ViewerPage slug={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^([^/]+)\/([^/]+)$/))) return <ViewerPage slug={decodeURIComponent(m[1]).toLowerCase()} code={decodeURIComponent(m[2]).toLowerCase()} />;

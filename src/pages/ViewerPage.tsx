@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import InvitationView from '../invitation/InvitationView';
 import { api, ApiError, trackEvent } from '../lib/api';
-import { asset, inviteUrl } from '../lib/paths';
+import { asset, inviteUrl, ticketUrl } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
 import { CUSTOM_FONT, type InvitationConfig } from '../shared/invitation';
 import { statKey, type PublicLinkInfo, type PublicTracking } from '../shared/tracking';
@@ -145,9 +145,8 @@ export default function ViewerPage({ slug, code = '' }: { slug: string; code?: s
       repCard={tracking?.repCard ?? true}
       showCompanyContact={tracking?.showCompanyContact ?? true}
       onEvent={type => trackEvent(config.slug, type, { link: dims.current, utm: dims.utm })}
-      onRsvp={async data => {
-        await api.rsvp(config.slug, { ...data, link: dims.credited, via: dims.current, utm: dims.utm });
-      }}
+      onRsvp={async data => (await api.rsvp(config.slug, { ...data, link: dims.credited, via: dims.current, utm: dims.utm })).ticket}
+      ticketUrlOf={code => ticketUrl(config.slug, code)}
     />
   );
 }

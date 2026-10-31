@@ -105,7 +105,7 @@ export function HistoryModal({ id, hasPublished, onClose, onRestored }: { id: st
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold">{when(h.at)}</p>
               <p className="text-xs text-slate-500 truncate">
-                {KIND_LABEL[h.kind]} · {[h.company, h.event].filter(Boolean).join(' — ') || 'بدون نام'}
+                {KIND_LABEL[h.kind]}، {[h.company, h.event].filter(Boolean).join(' — ') || 'بدون نام'}
               </p>
             </div>
             <button disabled={busy} onClick={() => restore({ index: h.index }, when(h.at))} className="shrink-0 rounded-xl border border-slate-300 text-xs font-bold px-3 py-2 hover:bg-slate-50">
@@ -223,7 +223,8 @@ export function RsvpTable({ list, slug, onDelete }: { list: Rsvp[]; slug: string
     <>
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-bold flex items-center gap-1.5">
-          <Users className="w-4 h-4" /> {fa(list.length)} پاسخ · {fa(total)} نفر
+          <Users className="w-4 h-4" /> {fa(list.filter(r => !r.walkIn).length)} پاسخ، {fa(total)} نفر
+          {list.some(r => r.checkedInAt) && <span className="text-emerald-700">، {fa(list.filter(r => r.checkedInAt).length)} حاضر در غرفه</span>}
         </p>
         <span className="flex-1" />
         <button
@@ -231,8 +232,8 @@ export function RsvpTable({ list, slug, onDelete }: { list: Rsvp[]; slug: string
             downloadFile(
               `rsvp-${slug || 'invitation'}.csv`,
               toCsv([
-                ['نام', 'تلفن', 'شرکت/سازمان', 'روز حضور', 'تعداد', 'لینک شخصی', 'زبان', 'کارشناس', 'کانال', 'لینک (اعتبار)', 'آخرین لینک', 'ارجاع', 'UTM', 'زمان ثبت'],
-                ...list.map(r => [r.name, r.phone, r.org, r.day ? dayFa(r.day) : '', r.count, r.guest, r.lang, r.repName ?? '', r.channel ? channelLabel(r.channel) : '', r.link ?? '', r.via ?? '', r.referral ? 'بله' : '', r.utm ?? '', when(r.at)]),
+                ['نام', 'تلفن', 'شرکت/سازمان', 'روز حضور', 'تعداد', 'لینک شخصی', 'زبان', 'کارشناس', 'کانال', 'لینک (اعتبار)', 'آخرین لینک', 'ارجاع', 'UTM', 'زمان ثبت', 'کد بلیت', 'حضور در غرفه', 'ثبت توسط', 'دفعات مراجعه', 'بدون اعلام قبلی'],
+                ...list.map(r => [r.name, r.phone, r.org, r.day ? dayFa(r.day) : '', r.count, r.guest, r.lang, r.repName ?? '', r.channel ? channelLabel(r.channel) : '', r.link ?? '', r.via ?? '', r.referral ? 'بله' : '', r.utm ?? '', when(r.at), r.ticket ?? '', r.checkedInAt ? when(r.checkedInAt) : '', r.checkedInBy ?? '', r.visits ?? 0, r.walkIn ? 'بله' : '']),
               ]),
             )
           }
@@ -263,14 +264,18 @@ export function RsvpTable({ list, slug, onDelete }: { list: Rsvp[]; slug: string
                 <td className="p-2 text-xs" dir="ltr">
                   {r.phone}
                 </td>
-                <td className="p-2 text-xs">{dayFa(r.day)}</td>
+                <td className="p-2 text-xs">
+                  {dayFa(r.day)}
+                  {r.checkedInAt && <p className="text-emerald-700 font-bold">✓ غرفه {new Date(r.checkedInAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</p>}
+                  {r.walkIn && <p className="text-slate-500">بدون اعلام قبلی</p>}
+                </td>
                 <td className="p-2 text-center tabular-nums">{fa(r.count)}</td>
                 {tracked && (
                   <td className="p-2 text-xs">
                     <p className="font-bold">{r.repName || 'شرکت'}</p>
                     <p className="text-slate-500">
                       {r.channel ? channelLabel(r.channel) : 'لینک اصلی'}
-                      {r.referral ? ' · ارجاع' : ''}
+                      {r.referral ? '، ارجاع' : ''}
                     </p>
                   </td>
                 )}

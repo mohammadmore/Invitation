@@ -33,6 +33,7 @@ import { BasicsStep, BrandStep, EnglishStep, EventStep, GuestsStep, MediaStep, T
 import { ConflictModal, DuplicateModal, FeedbackSection, HistoryModal, PersonalLinks, RsvpList } from '../builder/panels';
 import LinksStep from '../builder/links';
 import NotifySection from '../builder/notify';
+import CheckinSection from '../builder/checkin';
 import Dashboard from '../builder/dashboard';
 import type { PublicLinkInfo, Tracking } from '../shared/tracking';
 import type { Stats } from '../lib/api';
@@ -497,6 +498,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
                   trackingHint="در حالت «چند لینک» (مرحله بعد)، اعلام حضور به کارشناسی که لینکش اعتبار را گرفته، روی شماره موبایل یا واتس‌اپ او پیامک می‌شود."
                 />
               )}
+              {record && <CheckinSection recordId={record.id} rsvpEnabled={config.rsvp.enabled} />}
               {record && config.rsvp.enabled && <RsvpList id={record.id} slug={config.slug} />}
             </>
           )}

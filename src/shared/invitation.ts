@@ -483,7 +483,7 @@ export const isMissing = (c: InvitationConfig, key: ItemKey) => isShown(c, key) 
 // ---------- validation / sanitising (shared by client and server) ----------
 
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
-export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'rep', 'settings', 'en', 'fa', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
+export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'rep', 'settings', 'checkin', 't', 'en', 'fa', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;

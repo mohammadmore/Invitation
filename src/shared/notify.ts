@@ -70,7 +70,7 @@ export interface NotifySettings {
   template: string;
 }
 
-export const DEFAULT_NOTIFY_TEMPLATE = 'اعلام حضور جدید — {event}\n{guest}{org}\nتلفن: {phone}\nروز: {day} · {count} نفر\nلینک: {source}';
+export const DEFAULT_NOTIFY_TEMPLATE = 'اعلام حضور جدید — {event}\n{guest}{org}\nتلفن: {phone}\nروز: {day}، {count} نفر\nلینک: {source}';
 
 export const DEFAULT_NOTIFY: NotifySettings = { enabled: false, toRep: true, extraNumbers: '', template: DEFAULT_NOTIFY_TEMPLATE };
 
