@@ -1,0 +1,31 @@
+// Self-hosted fonts (no Google Fonts dependency – it is slow/unreliable in Iran).
+// Each @font-face uses unicode-range subsets, so browsers only download the files actually used.
+import '@fontsource/vazirmatn/400.css';
+import '@fontsource/vazirmatn/500.css';
+import '@fontsource/vazirmatn/600.css';
+import '@fontsource/vazirmatn/700.css';
+import '@fontsource/vazirmatn/900.css';
+import '@fontsource/noto-sans-arabic/400.css';
+import '@fontsource/noto-sans-arabic/500.css';
+import '@fontsource/noto-sans-arabic/700.css';
+import '@fontsource/noto-sans-arabic/900.css';
+import '@fontsource/mada/400.css';
+import '@fontsource/mada/500.css';
+import '@fontsource/mada/700.css';
+import '@fontsource/mada/900.css';
+import '@fontsource/changa/400.css';
+import '@fontsource/changa/500.css';
+import '@fontsource/changa/700.css';
+import '@fontsource/changa/800.css';
+import '@fontsource/reem-kufi/400.css';
+import '@fontsource/reem-kufi/500.css';
+import '@fontsource/reem-kufi/700.css';
+import '@fontsource/lalezar/400.css';
+import '@fontsource/noto-naskh-arabic/400.css';
+import '@fontsource/noto-naskh-arabic/500.css';
+import '@fontsource/noto-naskh-arabic/700.css';
+import '@fontsource/markazi-text/400.css';
+import '@fontsource/markazi-text/500.css';
+import '@fontsource/markazi-text/700.css';
+import '@fontsource/amiri/400.css';
+import '@fontsource/amiri/700.css';

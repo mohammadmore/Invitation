@@ -1,8 +1,5 @@
 {
-  "name": "Behan Sar",
-  "description": "",
-  "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "name": "Expo Invitation Builder",
+  "description": "Wizard for building branded, shareable exhibition invitations",
+  "requestFramePermissions": []
 }
