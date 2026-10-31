@@ -1,4 +1,4 @@
-import { TIMEZONES, type InvitationConfig } from './invitation';
+import { hasTimes, isShown, TIMEZONES, type InvitationConfig } from './invitation';
 
 /** Offset (minutes) of `tz` from UTC at the given instant. */
 function tzOffsetMinutes(utcMs: number, tz: string): number {
@@ -63,6 +63,7 @@ export function jalaliRangeLabel(start: string, end: string): string {
 
 /** Persian label such as "ساعت ۹ الی ۱۷" (+ zone name when not Tehran). */
 export function timeRangeLabel(start: string, end: string, tz = 'Asia/Tehran'): string {
+  if (!start || !end) return '';
   const fmt = (t: string) => {
     const [h, m] = t.split(':').map(Number);
     return m ? `${faDigits(h)}:${faDigits(String(m).padStart(2, '0'))}` : faDigits(h);
@@ -74,17 +75,27 @@ export function timeRangeLabel(start: string, end: string, tz = 'Asia/Tehran'): 
 /** True once the last exhibition day has closed in the venue's time zone. */
 export function eventEnded(c: InvitationConfig, now = Date.now()): boolean {
   if (!c.event.endDate) return false;
-  return now > zonedToUtc(c.event.endDate, c.event.endTime || '23:59', c.event.timezone);
+  return now > zonedToUtc(c.event.endDate, (useTimes(c) && c.event.endTime) || '23:59', c.event.timezone);
 }
 
 function eventDetailsText(c: InvitationConfig): string {
   const lines = [`با افتخار منتظر حضور گرم شما در غرفه شرکت ${c.company.name} هستیم.`, '', `مکان: ${c.event.location}`];
-  if (c.event.booth) lines.push(c.event.booth);
-  if (c.event.timeLabel) lines.push(c.event.timeLabel);
+  if (c.event.booth && isShown(c, 'booth')) lines.push(c.event.booth);
+  if (c.event.timeLabel && isShown(c, 'time')) lines.push(c.event.timeLabel);
   return lines.join('\n');
 }
 
 const summary = (c: InvitationConfig) => `بازدید از غرفه ${c.company.name} - ${c.event.title}`;
+
+/** Calendar entries use the daily opening hours when known; otherwise an all-day event. */
+const useTimes = (c: InvitationConfig) => hasTimes(c) && isShown(c, 'time');
+
+const compactDate = (d: string) => d.replace(/-/g, '');
+function nextDay(d: string) {
+  const t = new Date(`${d}T00:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + 1);
+  return t.toISOString().slice(0, 10);
+}
 
 /** First day's opening hours; multi-day exhibitions repeat daily (not one 56-hour block). */
 function firstDay(c: InvitationConfig) {
@@ -93,16 +104,14 @@ function firstDay(c: InvitationConfig) {
 }
 
 export function googleCalendarUrl(c: InvitationConfig): string {
-  const { start, end, days } = firstDay(c);
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: summary(c),
-    dates: `${start}/${end}`,
-    details: eventDetailsText(c),
-    location: c.event.location,
-    ctz: c.event.timezone,
-  });
-  if (days > 1) params.set('recur', `RRULE:FREQ=DAILY;COUNT=${days}`);
+  const params = new URLSearchParams({ action: 'TEMPLATE', text: summary(c), details: eventDetailsText(c), location: c.event.location, ctz: c.event.timezone });
+  if (useTimes(c)) {
+    const { start, end, days } = firstDay(c);
+    params.set('dates', `${start}/${end}`);
+    if (days > 1) params.set('recur', `RRULE:FREQ=DAILY;COUNT=${days}`);
+  } else {
+    params.set('dates', `${compactDate(c.event.startDate)}/${compactDate(nextDay(c.event.endDate))}`);
+  }
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
@@ -129,7 +138,13 @@ function fold(line: string): string {
 }
 
 export function icsContent(c: InvitationConfig): string {
-  const { start, end, days } = firstDay(c);
+  let timing: string[];
+  if (useTimes(c)) {
+    const { start, end, days } = firstDay(c);
+    timing = [`DTSTART:${start}`, `DTEND:${end}`, ...(days > 1 ? [`RRULE:FREQ=DAILY;COUNT=${days}`] : [])];
+  } else {
+    timing = [`DTSTART;VALUE=DATE:${compactDate(c.event.startDate)}`, `DTEND;VALUE=DATE:${compactDate(nextDay(c.event.endDate))}`];
+  }
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -139,9 +154,7 @@ export function icsContent(c: InvitationConfig): string {
     'BEGIN:VEVENT',
     `UID:${c.slug || 'invite'}-${c.event.startDate}@expo-invite`,
     `DTSTAMP:${stamp(Date.now())}`,
-    `DTSTART:${start}`,
-    `DTEND:${end}`,
-    ...(days > 1 ? [`RRULE:FREQ=DAILY;COUNT=${days}`] : []),
+    ...timing,
     `SUMMARY:${icsEscape(summary(c))}`,
     `DESCRIPTION:${icsEscape(eventDetailsText(c))}`,
     `LOCATION:${icsEscape(c.event.location)}`,

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy, ExternalLink, CalendarX } from 'lucide-react';
-import { CUSTOM_FONT, fillPlaceholders, safeUrl, type InvitationConfig } from '../shared/invitation';
-import { eventEnded, googleCalendarUrl, icsContent } from '../shared/calendar';
+import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy, ExternalLink, CalendarX, TriangleAlert } from 'lucide-react';
+import { CUSTOM_FONT, fillPlaceholders, isFilled, isMissing, isShown, ITEMS, safeUrl, type InvitationConfig, type ItemKey } from '../shared/invitation';
+import { eventEnded, googleCalendarUrl, icsContent, jalaliRangeLabel, timeRangeLabel } from '../shared/calendar';
 import { themeColors } from '../shared/color';
 import { apiUrl, asset } from '../lib/paths';
 
@@ -59,6 +59,16 @@ async function copyText(text: string): Promise<boolean> {
 
 const hideOnError = (e: React.SyntheticEvent<HTMLImageElement>) => (e.currentTarget.style.visibility = 'hidden');
 
+/** Red, unmissable placeholder for content that hasn't been provided yet (previews only). */
+function Missing({ text, className = '' }: { text: string; className?: string }) {
+  return (
+    <div role="alert" className={`flex items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-red-500 bg-red-50 text-red-600 font-black text-sm leading-snug px-3 py-2 text-center shadow-[0_0_0_3px_rgba(239,68,68,0.15)] ${className}`}>
+      <TriangleAlert className="w-4 h-4 shrink-0" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
 export interface InvitationViewProps {
   config: InvitationConfig;
   /** Rendered inside the wizard preview: no autoplay, no history, contained positioning. */
@@ -67,11 +77,16 @@ export interface InvitationViewProps {
   focus?: { step: number; key: number };
   /** Absolute URL that should be shared (defaults to the current page). */
   shareUrl?: string;
+  /** Draft previews: show every missing (not hidden) item as a red placeholder. */
+  showMissing?: boolean;
 }
 
-export default function InvitationView({ config, embedded = false, focus, shareUrl }: InvitationViewProps) {
+export default function InvitationView({ config, embedded = false, focus, shareUrl, showMissing = false }: InvitationViewProps) {
   const { company, event, texts, theme, media, footer } = config;
-  const hasMap = !!safeUrl(event.boothMapUrl);
+  const shown = (k: ItemKey) => isShown(config, k);
+  const miss = (k: ItemKey) => showMissing && isMissing(config, k);
+  const ready = (k: ItemKey) => shown(k) && isFilled(config, k);
+  const hasMap = ready('boothMap');
   const [step, setStep] = useState(1);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
@@ -247,7 +262,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
     showToast((await copyText(url)) ? 'لینک دعوتنامه کپی شد' : 'مرورگر شما از این قابلیت پشتیبانی نمی‌کند');
   };
 
-  const calendarReady = !!(event.startDate && event.endDate) && event.endTime > event.startTime && !ended;
+  const calendarReady = ready('calendar') && !ended;
   const gcalUrl = useMemo(() => (calendarReady ? googleCalendarUrl(config) : '#'), [config, calendarReady]);
   // Published invitations get a real .ics from the server (much more reliable on iOS / in-app browsers).
   const icsUrl = useMemo(() => {
@@ -280,7 +295,10 @@ export default function InvitationView({ config, embedded = false, focus, shareU
   const footerUrl = safeUrl(footer.url);
   const spring = { duration: 0.8, type: 'spring' as const, bounce: 0.4 };
   const btnPrimary = 'animate-gradient-btn hover:scale-[1.02] hover:shadow-[0_10px_25px_rgba(0,0,0,0.35)]';
-  const poster = asset(media.videoPoster);
+  const poster = ready('video') ? asset(media.videoPoster) : '';
+  const dateText = event.dateLabel || jalaliRangeLabel(event.startDate, event.endDate);
+  const timeText = event.timeLabel || timeRangeLabel(event.startTime, event.endTime, event.timezone);
+  const mapUrlShown = ready('mapUrl') ? mapUrl : '';
 
   const locationInner = (
     <>
@@ -288,8 +306,9 @@ export default function InvitationView({ config, embedded = false, focus, shareU
         <MapPin className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
       </div>
       <div className="flex flex-col min-w-0">
-        <span className="font-bold text-base @2xl:text-lg leading-tight break-words">{event.location || 'محل برگزاری'}</span>
-        {mapUrl && (
+        <span className="font-bold text-base @2xl:text-lg leading-tight break-words">{event.location}</span>
+        {miss('mapUrl') && <Missing text={ITEMS.mapUrl.missing} className="mt-1.5 text-xs py-1" />}
+        {mapUrlShown && (
           <span className="text-xs @2xl:text-sm text-(--c-accent-ink) font-bold mt-1 opacity-80 group-hover:opacity-100 flex items-center gap-1">
             <Map className="w-3.5 h-3.5 @2xl:w-4 @2xl:h-4" />
             برای مسیریابی روی نقشه کلیک کنید
@@ -369,7 +388,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
             className="absolute inset-0 w-full h-full object-cover @3xl:blur-2xl @3xl:scale-110"
           />
         )}
-        {media.video && (
+        {ready('video') && (
           <video
             key={media.video}
             ref={videoRef}
@@ -394,11 +413,18 @@ export default function InvitationView({ config, embedded = false, focus, shareU
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-(--c-accent)/10 rounded-full blur-3xl" style={{ transform: 'translateZ(0)' }} />
       </div>
 
-      {media.music && (
+      {ready('music') && (
         <audio key={media.music} ref={audioRef} loop preload="none" src={asset(media.music)} onPlay={() => setIsMusicPlaying(true)} onPause={() => setIsMusicPlaying(false)} />
       )}
 
-      {media.music && (
+      {(miss('video') || miss('music')) && (
+        <div className="absolute top-20 inset-x-4 z-50 flex flex-col items-center gap-1.5 pointer-events-none">
+          {miss('video') && <Missing text={ITEMS.video.missing} className="text-xs py-1" />}
+          {miss('music') && <Missing text={ITEMS.music.missing} className="text-xs py-1" />}
+        </div>
+      )}
+
+      {ready('music') && (
         <button
           onClick={toggleMusic}
           aria-label={isMusicPlaying ? 'قطع صدا' : 'پخش صدا'}
@@ -416,11 +442,11 @@ export default function InvitationView({ config, embedded = false, focus, shareU
             <motion.div key="step1" initial={{ opacity: 0, scale: 0.95, y: 50 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: -50 }} transition={spring} className="text-center w-full">
               <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.8 }} className="mb-8 relative">
                 <div className="absolute inset-0 bg-white/20 blur-xl rounded-full" />
-                {company.logo ? (
+                {ready('logo') ? (
                   <img src={asset(company.logo)} alt={company.name} onError={hideOnError} className="w-72 max-h-40 object-contain h-auto mx-auto drop-shadow-2xl relative z-10" />
-                ) : (
-                  <p className="relative z-10 text-4xl font-black drop-shadow-2xl break-words">{company.name || 'نام شرکت'}</p>
-                )}
+                ) : miss('logo') ? (
+                  <Missing text={ITEMS.logo.missing} className="relative z-10 max-w-xs mx-auto py-6" />
+                ) : null}
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6, duration: 0.8 }} className="bg-white/90 backdrop-blur-xl p-5 @2xl:p-8 rounded-3xl border border-white/50 shadow-2xl">
@@ -430,19 +456,23 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   </p>
                 )}
                 <h1 className="text-3xl font-black text-(--c-primary-ink) mb-0 leading-tight relative z-10 break-words">
-                  {event.badge && <span className="block text-(--c-accent-ink) text-xl mb-2 @2xl:mb-3 font-bold">{event.badge}</span>}
-                  {event.title || 'نام نمایشگاه'}
+                  {ready('badge') && <span className="block text-(--c-accent-ink) text-xl mb-2 @2xl:mb-3 font-bold">{event.badge}</span>}
+                  {miss('badge') && <Missing text={ITEMS.badge.missing} className="mb-2 text-xs py-1" />}
+                  {event.title || (showMissing ? <Missing text="نام نمایشگاه هنوز وارد نشده" /> : null)}
                 </h1>
 
-                {event.logo ? (
+                {ready('eventLogo') ? (
                   <div className="w-full flex justify-center items-center -mt-4 @2xl:-mt-5 -mb-3 @2xl:-mb-5 relative z-0">
                     <img src={asset(event.logo)} alt={event.title} onError={hideOnError} className="h-24 @2xl:h-28 max-w-full w-auto object-contain" />
                   </div>
+                ) : miss('eventLogo') ? (
+                  <Missing text={ITEMS.eventLogo.missing} className="my-3" />
                 ) : (
                   <div className="h-4" />
                 )}
 
-                {event.welcomeText && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{event.welcomeText}</p>}
+                {ready('welcomeText') && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{event.welcomeText}</p>}
+                {miss('welcomeText') && <Missing text={ITEMS.welcomeText.missing} className="mb-4" />}
 
                 <button onClick={enter} className={`flex items-center justify-center gap-2 text-white px-8 py-4 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
                   <span className="text-lg">{texts.enterButton}</span>
@@ -455,16 +485,20 @@ export default function InvitationView({ config, embedded = false, focus, shareU
           {/* STEP 2: INVITATION MESSAGE */}
           {step === 2 && (
             <motion.div key="step2" initial={{ opacity: 0, scale: 0.95, y: 50 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: -50 }} transition={spring} className="bg-white/90 backdrop-blur-xl p-4 @2xl:p-6 pb-4 @2xl:pb-5 rounded-3xl border border-white/50 shadow-2xl text-slate-800 w-full relative mt-6">
-              <div className="absolute -top-7 @2xl:-top-10 left-1/2 transform -translate-x-1/2 bg-white p-2.5 @2xl:p-3 rounded-full shadow-xl z-10">
-                {company.icon ? (
+              {ready('icon') && (
+                <div className="absolute -top-7 @2xl:-top-10 left-1/2 transform -translate-x-1/2 bg-white p-2.5 @2xl:p-3 rounded-full shadow-xl z-10">
                   <img src={asset(company.icon)} alt={company.name} onError={hideOnError} className="w-12 h-12 @2xl:w-16 @2xl:h-16 object-contain" />
-                ) : (
-                  <div className="w-12 h-12 @2xl:w-16 @2xl:h-16 rounded-full bg-(--c-btn-primary) text-white flex items-center justify-center text-2xl font-black">{company.name.trim().charAt(0) || '؟'}</div>
-                )}
-              </div>
+                </div>
+              )}
+              {miss('icon') && (
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-10 w-20 h-20 rounded-full border-2 border-dashed border-red-500 bg-red-50 text-red-600 text-[10px] font-black leading-tight flex items-center justify-center text-center p-2 shadow-xl">
+                  نشان شرکت وارد نشده
+                </div>
+              )}
 
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="space-y-2 @2xl:space-y-3 pt-8 @2xl:pt-10">
-                {letterParagraphs.map((p, i) => (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className={`space-y-2 @2xl:space-y-3 ${shown('icon') ? 'pt-8 @2xl:pt-10' : 'pt-1'}`}>
+                {miss('letter') && <Missing text={ITEMS.letter.missing} className="py-8" />}
+                {(ready('letter') ? letterParagraphs : []).map((p, i) => (
                   <p key={i} className="text-[14.5px] @2xl:text-[17px] leading-[1.6] @2xl:leading-[1.7] font-medium text-justify whitespace-pre-line break-words">
                     {p}
                   </p>
@@ -472,8 +506,9 @@ export default function InvitationView({ config, embedded = false, focus, shareU
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="text-center pt-3 @2xl:pt-4 border-t border-slate-200 mt-3 @2xl:mt-4">
-                <p className="font-bold text-(--c-primary-ink) text-sm @2xl:text-base">{company.name}</p>
-                {company.tagline && <p className="text-xs @2xl:text-sm font-semibold text-(--c-accent-ink) mt-0.5 @2xl:mt-1">{company.tagline}</p>}
+                {company.name ? <p className="font-bold text-(--c-primary-ink) text-sm @2xl:text-base">{company.name}</p> : showMissing && <Missing text="نام شرکت هنوز وارد نشده" />}
+                {ready('tagline') && <p className="text-xs @2xl:text-sm font-semibold text-(--c-accent-ink) mt-0.5 @2xl:mt-1">{company.tagline}</p>}
+                {miss('tagline') && <Missing text={ITEMS.tagline.missing} className="mt-1.5 text-xs py-1" />}
               </motion.div>
 
               <motion.button initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.6 }} onClick={() => goTo(3)} className={`mt-4 @2xl:mt-5 flex items-center justify-center gap-2 text-white px-6 @2xl:px-8 py-2.5 @2xl:py-3 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
@@ -491,34 +526,50 @@ export default function InvitationView({ config, embedded = false, focus, shareU
           {/* STEP 3: TIME & PLACE */}
           {step >= 3 && (
             <motion.div key="step3" initial={{ opacity: 0, scale: 0.95, y: 50 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: -50 }} transition={spring} className="w-full flex flex-col gap-4">
+              {(shown('date') || shown('time') || shown('location') || shown('booth')) && (
               <div className="bg-white/90 backdrop-blur-xl p-4 @2xl:p-6 rounded-3xl border border-white/50 shadow-2xl space-y-3 @2xl:space-y-5 text-slate-800">
-                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="flex items-center gap-3 @2xl:gap-4">
-                  <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
-                    <CalendarIcon className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
-                  </div>
-                  <span className="font-bold text-base @2xl:text-lg">{event.dateLabel || 'تاریخ برگزاری'}</span>
-                </motion.div>
+                {shown('date') && (
+                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="flex items-center gap-3 @2xl:gap-4">
+                    <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
+                      <CalendarIcon className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
+                    </div>
+                    {ready('date') ? <span className="font-bold text-base @2xl:text-lg">{dateText}</span> : miss('date') && <Missing text={ITEMS.date.missing} className="flex-1" />}
+                  </motion.div>
+                )}
 
-                {event.timeLabel && (
+                {shown('time') && (ready('time') || miss('time')) && (
                   <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }} className="flex items-center gap-3 @2xl:gap-4">
                     <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
                       <Clock className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
                     </div>
-                    <span className="font-bold text-base @2xl:text-lg">{event.timeLabel}</span>
+                    {ready('time') ? <span className="font-bold text-base @2xl:text-lg">{timeText}</span> : <Missing text={ITEMS.time.missing} className="flex-1" />}
                   </motion.div>
                 )}
 
-                {mapUrl ? (
-                  <motion.a initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} href={mapUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 @2xl:gap-4 hover:text-(--c-accent-ink) transition-colors group">
-                    {locationInner}
-                  </motion.a>
-                ) : (
-                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} className="flex items-center gap-3 @2xl:gap-4">
-                    {locationInner}
-                  </motion.div>
-                )}
+                {shown('location') &&
+                  (!ready('location') ? (
+                    miss('location') && (
+                      <div className="flex items-center gap-3 @2xl:gap-4">
+                        <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
+                          <MapPin className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
+                        </div>
+                        <div className="flex-1 space-y-1.5">
+                          <Missing text={ITEMS.location.missing} />
+                          {miss('mapUrl') && <Missing text={ITEMS.mapUrl.missing} className="text-xs py-1" />}
+                        </div>
+                      </div>
+                    )
+                  ) : mapUrlShown ? (
+                    <motion.a initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} href={mapUrlShown} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 @2xl:gap-4 hover:text-(--c-accent-ink) transition-colors group">
+                      {locationInner}
+                    </motion.a>
+                  ) : (
+                    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} className="flex items-center gap-3 @2xl:gap-4">
+                      {locationInner}
+                    </motion.div>
+                  ))}
 
-                {event.booth && (
+                {ready('booth') && (
                   <motion.button
                     type="button"
                     disabled={!hasMap}
@@ -534,9 +585,19 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                     <span className="font-bold text-base @2xl:text-lg leading-tight break-words min-w-0">{event.booth}</span>
                   </motion.button>
                 )}
+                {miss('booth') && (
+                  <div className="flex items-center gap-3 @2xl:gap-4 pt-3 @2xl:pt-4 border-t border-slate-200">
+                    <div className="bg-(--c-accent)/10 p-2 @2xl:p-3 rounded-2xl text-(--c-accent-ink) shrink-0">
+                      <Building className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
+                    </div>
+                    <Missing text={ITEMS.booth.missing} className="flex-1" />
+                  </div>
+                )}
               </div>
+              )}
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1 }} className="flex flex-col gap-2 @2xl:gap-3 mt-1 @2xl:mt-2">
+                {miss('boothMap') && <Missing text={ITEMS.boothMap.missing} className="py-3 mb-2" />}
                 {hasMap && (
                   <button onClick={() => goTo(4)} className={`flex items-center justify-center gap-2 @2xl:gap-3 w-full text-white py-3 @2xl:py-4 px-6 rounded-2xl font-bold transition-all shadow-lg mb-2 @2xl:mb-3 ${btnPrimary}`}>
                     <Map className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
@@ -557,6 +618,8 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   </div>
                 )}
 
+                {showMissing && shown('calendar') && !isFilled(config, 'calendar') && <Missing text={ITEMS.calendar.missing} />}
+
                 {isInApp && calendarReady && (
                   <button
                     onClick={async () => showToast((await copyText(pageUrl())) ? 'لینک کپی شد؛ آن را در مرورگر باز کنید' : 'لینک را از منوی بالای صفحه باز کنید')}
@@ -567,10 +630,12 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   </button>
                 )}
 
-                <button onClick={handleShare} className={`mt-1 @2xl:mt-2 flex items-center justify-center gap-2 @2xl:gap-3 w-full text-white py-3 @2xl:py-4 px-6 rounded-2xl font-bold transition-all shadow-lg ${btnPrimary}`}>
-                  <Share2 className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
-                  <span className="text-base @2xl:text-lg">{texts.shareButton}</span>
-                </button>
+                {shown('share') && (
+                  <button onClick={handleShare} className={`mt-1 @2xl:mt-2 flex items-center justify-center gap-2 @2xl:gap-3 w-full text-white py-3 @2xl:py-4 px-6 rounded-2xl font-bold transition-all shadow-lg ${btnPrimary}`}>
+                    <Share2 className="w-5 h-5 @2xl:w-6 @2xl:h-6" />
+                    <span className="text-base @2xl:text-lg">{texts.shareButton}</span>
+                  </button>
+                )}
 
                 <button onClick={() => goBack(2)} className="mt-2 @2xl:mt-5 text-xs @2xl:text-sm font-semibold text-(--c-fg)/70 hover:text-(--c-fg) transition-colors flex items-center justify-center gap-1 mx-auto">
                   <ChevronRight className="w-4 h-4" />

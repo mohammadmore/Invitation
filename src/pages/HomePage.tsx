@@ -1,25 +1,30 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import { ExternalLink, Pencil, Plus, Trash2, Sparkles, Lock, KeyRound, LogOut } from 'lucide-react';
-import { api, editUrl, forgetMyInvitation, getAdminPassword, getMyInvitations, saveMyInvitation, setAdminPassword, setEditAuth, type MyInvitation } from '../lib/api';
+import { api, editUrl, forgetMyInvitation, getAdminPassword, getMyInvitations, saveMyInvitation, setAdminPassword, setEditAuth, type MyInvitation, type RecordStatus, type RecordSummary } from '../lib/api';
 import { route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
 
-interface AdminItem {
-  slug: string;
-  company: string;
-  event: string;
-  updatedAt: string;
+const STATUS: Record<RecordStatus, { label: string; cls: string }> = {
+  draft: { label: 'پیش‌نویس', cls: 'bg-slate-500/20 text-slate-300' },
+  published: { label: 'منتشر شده', cls: 'bg-emerald-500/20 text-emerald-300' },
+  changed: { label: 'تغییرات منتشرنشده', cls: 'bg-amber-500/20 text-amber-300' },
+};
+
+function StatusBadge({ status }: { status?: RecordStatus }) {
+  if (!status) return null;
+  return <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${STATUS[status].cls}`}>{STATUS[status].label}</span>;
 }
 
 export default function HomePage() {
   const [mine, setMine] = useState<MyInvitation[]>(getMyInvitations);
+  const [statuses, setStatuses] = useState<Record<string, RecordStatus>>({});
   const [adminRequired, setAdminRequired] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [all, setAll] = useState<AdminItem[]>([]);
+  const [all, setAll] = useState<RecordSummary[]>([]);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [issued, setIssued] = useState<{ slug: string; url: string } | null>(null);
+  const [issued, setIssued] = useState<{ name: string; url: string } | null>(null);
 
   useEffect(() => {
     hideSplash();
@@ -27,6 +32,15 @@ export default function HomePage() {
     document.body.style.backgroundColor = '#020617';
     api.meta().then(m => setAdminRequired(m.adminRequired)).catch(() => {});
     if (getAdminPassword()) loadAdmin();
+    // Current status of this browser's invitations
+    for (const item of getMyInvitations()) {
+      setEditAuth({ id: item.id, token: item.editToken });
+      api
+        .getRecord(item.id)
+        .then(r => setStatuses(s => ({ ...s, [item.id]: r.status })))
+        .catch(e => e.status === 404 && (forgetMyInvitation(item.id), setMine(getMyInvitations())));
+    }
+    setEditAuth(null);
   }, []);
 
   async function loadAdmin() {
@@ -55,27 +69,28 @@ export default function HomePage() {
     }
   }
 
-  async function remove(slug: string, label: string, token?: string) {
+  async function remove(id: string, label: string, token?: string) {
     if (!confirm(`دعوتنامه «${label}» و فایل‌های آن برای همیشه حذف شود؟`)) return;
     try {
-      setEditAuth(token ? { slug, token } : null);
-      await api.remove(slug);
+      setEditAuth(token ? { id, token } : null);
+      await api.remove(id);
     } catch (e) {
-      if (!String((e as Error).message).includes('پیدا نشد')) return alert((e as Error).message);
+      if ((e as { status?: number }).status !== 404) return alert((e as Error).message);
+    } finally {
+      setEditAuth(null);
     }
-    forgetMyInvitation(slug);
+    forgetMyInvitation(id);
     setMine(getMyInvitations());
-    setAll(a => a.filter(i => i.slug !== slug));
+    setAll(a => a.filter(i => i.id !== id));
   }
 
-  async function resetToken(item: AdminItem) {
-    if (!confirm(`برای «${item.company}» لینک ویرایش جدید صادر شود؟ لینک قبلی دیگر کار نمی‌کند.`)) return;
+  async function resetToken(item: RecordSummary) {
+    if (!confirm(`برای «${item.company || item.id}» لینک ویرایش جدید صادر شود؟ لینک قبلی دیگر کار نمی‌کند.`)) return;
     try {
-      const { editToken } = await api.resetToken(item.slug);
-      setIssued({ slug: item.slug, url: editUrl(item.slug, editToken) });
-      // The old token stored in this browser no longer works – keep the list usable.
-      if (mine.some(m => m.slug === item.slug)) {
-        saveMyInvitation({ slug: item.slug, editToken, company: item.company, event: item.event, createdAt: new Date().toISOString() });
+      const { editToken } = await api.resetToken(item.id);
+      setIssued({ name: item.company || item.id, url: editUrl(item.id, editToken) });
+      if (mine.some(m => m.id === item.id)) {
+        saveMyInvitation({ id: item.id, editToken, slug: item.slug, company: item.company, event: item.event, createdAt: new Date().toISOString() });
         setMine(getMyInvitations());
       }
     } catch (e) {
@@ -83,7 +98,8 @@ export default function HomePage() {
     }
   }
 
-  const mineSlugs = new Set(mine.map(m => m.slug));
+  const mineIds = new Set(mine.map(m => m.id));
+  const label = (company: string, event: string) => [company || 'بدون نام', event].filter(Boolean).join(' — ');
 
   return (
     <div className="min-h-[100dvh] bg-slate-950 text-white">
@@ -96,7 +112,7 @@ export default function HomePage() {
           </div>
           <h1 className="text-3xl sm:text-4xl font-black leading-tight mb-4">دعوتنامه اختصاصی شرکت خود را در چند دقیقه بسازید</h1>
           <p className="text-slate-400 leading-relaxed max-w-xl mx-auto">
-            لوگو، رنگ‌ها، فونت، ویدئو، موزیک و متن‌ها را انتخاب کنید، پیش‌نمایش زنده را ببینید و یک لینک اختصاصی برای ارسال به مهمانان بگیرید.
+            اطلاعات را مرحله به مرحله وارد کنید؛ همه چیز خودکار ذخیره می‌شود. پیش‌نمایش را برای کارفرما بفرستید و وقتی همه چیز کامل شد، لینک نهایی را منتشر کنید.
           </p>
           <a href={route('builder')} className="mt-8 inline-flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black px-7 py-4 rounded-2xl shadow-lg shadow-sky-500/20 transition">
             <Plus className="w-5 h-5" />
@@ -109,22 +125,23 @@ export default function HomePage() {
             <h2 className="font-black text-lg mb-3">دعوتنامه‌های ساخته‌شده در این مرورگر</h2>
             <ul className="space-y-2">
               {mine.map(item => (
-                <li key={item.slug} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
+                <li key={item.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold truncate">
-                      {item.company} — {item.event}
-                    </p>
-                    <p dir="ltr" className="text-xs text-slate-400 text-right truncate">
-                      {route(item.slug)}
+                    <p className="font-bold truncate">{label(item.company, item.event)}</p>
+                    <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                      <StatusBadge status={statuses[item.id]} />
+                      {item.slug && <span dir="ltr">{route(item.slug)}</span>}
                     </p>
                   </div>
-                  <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-white/10" title="مشاهده">
-                    <ExternalLink className="w-5 h-5" />
-                  </a>
-                  <a href={editUrl(item.slug, item.editToken)} className="p-2 rounded-xl hover:bg-white/10" title="ویرایش">
+                  {statuses[item.id] && statuses[item.id] !== 'draft' && (
+                    <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-white/10" title="مشاهده">
+                      <ExternalLink className="w-5 h-5" />
+                    </a>
+                  )}
+                  <a href={editUrl(item.id, item.editToken)} className="p-2 rounded-xl hover:bg-white/10" title="ادامه ویرایش">
                     <Pencil className="w-5 h-5" />
                   </a>
-                  <button onClick={() => remove(item.slug, `${item.company} - ${item.event}`, item.editToken)} className="p-2 rounded-xl hover:bg-red-500/20 text-red-300" title="حذف">
+                  <button onClick={() => remove(item.id, label(item.company, item.event), item.editToken)} className="p-2 rounded-xl hover:bg-red-500/20 text-red-300" title="حذف">
                     <Trash2 className="w-5 h-5" />
                   </button>
                 </li>
@@ -150,33 +167,35 @@ export default function HomePage() {
             </div>
             {issued && (
               <div className="mb-3 rounded-2xl bg-amber-400/10 border border-amber-400/30 p-4 text-sm space-y-2">
-                <p className="font-bold text-amber-200">لینک ویرایش جدید «{issued.slug}» (فقط یک بار نمایش داده می‌شود):</p>
+                <p className="font-bold text-amber-200">لینک ویرایش جدید «{issued.name}» (فقط یک بار نمایش داده می‌شود):</p>
                 <input dir="ltr" readOnly value={issued.url} onFocus={e => e.target.select()} className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-xs font-mono" />
               </div>
             )}
             {all.length === 0 && <p className="text-slate-400 text-sm">هنوز دعوتنامه‌ای ساخته نشده است.</p>}
             <ul className="space-y-2">
               {all.map(item => (
-                <li key={item.slug} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
+                <li key={item.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold truncate">
-                      {item.company} — {item.event}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      <span dir="ltr">{route(item.slug)}</span> · {new Date(item.updatedAt).toLocaleDateString('fa-IR')}
+                    <p className="font-bold truncate">{label(item.company, item.event)}</p>
+                    <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
+                      <StatusBadge status={item.status} />
+                      {item.slug && <span dir="ltr">{route(item.slug)}</span>}
+                      <span>{new Date(item.updatedAt).toLocaleDateString('fa-IR')}</span>
                     </p>
                   </div>
-                  <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-white/10" title="مشاهده">
-                    <ExternalLink className="w-5 h-5" />
-                  </a>
-                  <a href={route(`builder/${item.slug}`)} className="p-2 rounded-xl hover:bg-white/10" title="ویرایش">
+                  {item.status !== 'draft' && (
+                    <a href={route(item.slug)} target="_blank" rel="noreferrer" className="p-2 rounded-xl hover:bg-white/10" title="مشاهده">
+                      <ExternalLink className="w-5 h-5" />
+                    </a>
+                  )}
+                  <a href={route(`builder/${item.id}`)} className="p-2 rounded-xl hover:bg-white/10" title="ویرایش">
                     <Pencil className="w-5 h-5" />
                   </a>
                   <button onClick={() => resetToken(item)} className="p-2 rounded-xl hover:bg-white/10" title="صدور لینک ویرایش جدید">
                     <KeyRound className="w-5 h-5" />
                   </button>
-                  {!mineSlugs.has(item.slug) && (
-                    <button onClick={() => remove(item.slug, `${item.company} - ${item.event}`)} className="p-2 rounded-xl hover:bg-red-500/20 text-red-300" title="حذف">
+                  {!mineIds.has(item.id) && (
+                    <button onClick={() => remove(item.id, label(item.company, item.event))} className="p-2 rounded-xl hover:bg-red-500/20 text-red-300" title="حذف">
                       <Trash2 className="w-5 h-5" />
                     </button>
                   )}

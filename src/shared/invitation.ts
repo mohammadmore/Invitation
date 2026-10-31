@@ -1,7 +1,7 @@
 // Shared invitation model: used by the wizard, the invitation viewer and the server.
 //
 // Asset references (logos, media, fonts) are stored *relative to the app base path*,
-// e.g. "uploads/abc.webp" or "bg.mp4", so invitations keep working if the app is
+// e.g. "uploads/abc.webp" or "background-music.mp3", so invitations keep working if the app is
 // moved (e.g. served from https://studio.asvashop.com/in/).
 
 export interface InvitationConfig {
@@ -26,7 +26,7 @@ export interface InvitationConfig {
     /** Gregorian dates, YYYY-MM-DD */
     startDate: string;
     endDate: string;
-    /** Daily opening hours, HH:MM in `timezone` */
+    /** Daily opening hours, HH:MM in `timezone` ('' = not entered yet) */
     startTime: string;
     endTime: string;
     /** IANA time zone of the venue */
@@ -71,6 +71,8 @@ export interface InvitationConfig {
     subText: string;
     url: string;
   };
+  /** Items the admin chose not to show at all (e.g. booth not decided yet). */
+  hidden: Partial<Record<ItemKey, boolean>>;
 }
 
 export const CUSTOM_FONT = '__custom__';
@@ -122,8 +124,7 @@ export const TIMEZONES: { id: string; label: string }[] = [
   { id: 'Asia/Shanghai', label: 'پکن / شانگهای' },
 ];
 
-export const PRESET_VIDEOS = [{ id: 'waves', label: 'غرفه نمایشگاهی', url: 'bg.mp4', poster: 'bg-poster.jpg' }];
-
+/** Ready-made background music (generic, not tied to any company). */
 export const PRESET_MUSIC = [
   { id: 'calm', label: 'آرام', url: 'background-music.mp3' },
   { id: 'corporate', label: 'رسمی', url: 'bg-music.mp3' },
@@ -136,93 +137,155 @@ export const DEFAULT_FOOTER: InvitationConfig['footer'] = {
   url: 'https://instagram.com/asvastudio',
 };
 
-export const DEFAULT_INVITATION: InvitationConfig = {
-  slug: '',
-  company: {
-    name: 'بهان سار',
-    tagline: 'همراه شما در مسیر سلامت و نوآوری',
-    logo: 'Logo.png',
-    icon: 'Logo2.png',
-    shareImage: '',
-  },
-  event: {
-    badge: 'دعوتنامه رسمی',
-    title: 'نمایشگاه ایران فارما',
-    logo: 'iranpharma.svg',
-    welcomeText: 'مفتخریم میزبان شما در این رویداد بزرگ باشیم',
-    startDate: '2026-09-23',
-    endDate: '2026-09-25',
-    startTime: '09:00',
-    endTime: '17:00',
-    timezone: 'Asia/Tehran',
-    dateLabel: '۱ تا ۳ مهر ماه ۱۴۰۵',
-    timeLabel: 'ساعت ۹ الی ۱۷',
-    location: 'مصلی تهران',
-    mapUrl: 'https://www.google.com/maps/search/?api=1&query=%D9%85%D8%B5%D9%84%DB%8C%20%D8%AA%D9%87%D8%B1%D8%A7%D9%86',
-    booth: 'سالن E، غرفه‌های ۱۵۹ تا ۱۶۲',
-    boothMapUrl: 'https://asvashop.com/behansar/map',
-  },
-  texts: {
-    letter:
-      'با سلام و احترام\nبا افتخار از شما دعوت می‌کنیم تا با حضور ارزشمند خود در نمایشگاه ایران فارما، میهمان غرفه بهان سار باشید.\n\nاین دیدار، فرصتی است برای گفت‌وگویی تازه، آشنایی با محصولات و دستاوردهای ما و گامی برای توسعه همکاری‌های ارزشمند آینده.',
-    enterButton: 'تایید و ورود',
-    detailsButton: 'مکان و زمان برگزاری',
-    mapButton: 'مکان‌یابی دقیق غرفه',
-    shareButton: 'اشتراک‌گذاری',
-    shareText: '',
-  },
-  theme: {
-    primary: '#0033A0',
-    accent: '#00B4F1',
-    background: '#0f172a',
-    font: 'Vazirmatn',
-    customFontUrl: '',
-  },
-  media: {
-    video: 'bg.mp4',
-    videoPoster: 'bg-poster.jpg',
-    videoOpacity: 75,
-    music: 'background-music.mp3',
-    musicVolume: 50,
-  },
-  footer: { ...DEFAULT_FOOTER },
-};
-
-const DEFAULT_LETTER =
-  'با سلام و احترام\nبا افتخار از شما دعوت می‌کنیم تا با حضور ارزشمند خود در {event}، میهمان غرفه {company} باشید.\n\nاین دیدار، فرصتی است برای گفت‌وگویی تازه، آشنایی با محصولات و دستاوردهای ما و گامی برای توسعه همکاری‌های ارزشمند آینده.';
-
-/** Starting point for a brand-new invitation in the wizard. */
-export function blankInvitation(): InvitationConfig {
-  const c = structuredClone(DEFAULT_INVITATION);
-  c.company = { name: '', tagline: '', logo: '', icon: '', shareImage: '' };
-  c.event = { ...c.event, title: '', logo: '', location: '', mapUrl: '', booth: '', boothMapUrl: '', startDate: '', endDate: '', dateLabel: '' };
-  c.texts.letter = DEFAULT_LETTER;
-  return c;
-}
-
 /**
- * Example content for "fill with sample": real-looking texts, but none of the
- * sample company's brand assets or links, so they can't be published by mistake.
+ * A brand-new, completely empty invitation. Nothing company- or event-specific is
+ * pre-filled, so no other client's data can end up in an invitation by mistake.
+ * Only neutral UI labels (button texts) and a neutral colour scheme have values.
  */
-export function sampleInvitation(keep: InvitationConfig): InvitationConfig {
-  const c = structuredClone(DEFAULT_INVITATION);
-  c.slug = keep.slug;
-  c.company = { ...c.company, name: keep.company.name || 'نام شرکت شما', logo: keep.company.logo, icon: keep.company.icon, shareImage: keep.company.shareImage };
-  c.event = { ...c.event, logo: keep.event.logo, boothMapUrl: keep.event.boothMapUrl };
-  c.texts.letter = DEFAULT_LETTER;
-  c.footer = keep.footer;
-  return c;
+export function blankInvitation(): InvitationConfig {
+  return {
+    slug: '',
+    company: { name: '', tagline: '', logo: '', icon: '', shareImage: '' },
+    event: {
+      badge: '',
+      title: '',
+      logo: '',
+      welcomeText: '',
+      startDate: '',
+      endDate: '',
+      startTime: '',
+      endTime: '',
+      timezone: 'Asia/Tehran',
+      dateLabel: '',
+      timeLabel: '',
+      location: '',
+      mapUrl: '',
+      booth: '',
+      boothMapUrl: '',
+    },
+    texts: {
+      letter: '',
+      enterButton: 'تایید و ورود',
+      detailsButton: 'مکان و زمان برگزاری',
+      mapButton: 'مکان‌یابی دقیق غرفه',
+      shareButton: 'اشتراک‌گذاری',
+      shareText: '',
+    },
+    theme: { primary: '#1E3A8A', accent: '#0EA5E9', background: '#0f172a', font: 'Vazirmatn', customFontUrl: '' },
+    media: { video: '', videoPoster: '', videoOpacity: 75, music: '', musicVolume: 50 },
+    footer: { ...DEFAULT_FOOTER },
+    hidden: {},
+  };
 }
+
+/** Optional ready-made wording the admin can insert with one click (generic, no names). */
+export const SUGGESTIONS = {
+  badge: 'دعوتنامه رسمی',
+  welcomeText: 'مفتخریم میزبان شما در این رویداد بزرگ باشیم',
+  letter:
+    'با سلام و احترام\nبا افتخار از شما دعوت می‌کنیم تا با حضور ارزشمند خود در {event}، میهمان غرفه {company} باشید.\n\nاین دیدار، فرصتی است برای گفت‌وگویی تازه، آشنایی با محصولات و دستاوردهای ما و گامی برای توسعه همکاری‌های ارزشمند آینده.',
+};
 
 /** Replace {company} / {event} placeholders in user-written text. */
 export function fillPlaceholders(text: string, c: InvitationConfig): string {
   return text.replaceAll('{company}', c.company.name).replaceAll('{event}', c.event.title);
 }
 
+// ---------- displayable items: hide flags & completeness ----------
+
+export type ItemKey =
+  | 'logo'
+  | 'icon'
+  | 'badge'
+  | 'eventLogo'
+  | 'welcomeText'
+  | 'letter'
+  | 'tagline'
+  | 'date'
+  | 'time'
+  | 'location'
+  | 'mapUrl'
+  | 'booth'
+  | 'boothMap'
+  | 'calendar'
+  | 'share'
+  | 'video'
+  | 'music';
+
+/** Every item that appears on the invitation, the wizard step that edits it, and its "missing" message. */
+export const ITEMS: Record<ItemKey, { label: string; step: number; missing: string }> = {
+  logo: { label: 'لوگوی شرکت', step: 1, missing: 'لوگوی شرکت هنوز بارگذاری نشده' },
+  icon: { label: 'نشان مربعی شرکت', step: 1, missing: 'نشان شرکت هنوز بارگذاری نشده' },
+  badge: { label: 'عنوان بالای نام نمایشگاه', step: 0, missing: 'عنوان بالای نام نمایشگاه وارد نشده' },
+  eventLogo: { label: 'لوگوی نمایشگاه', step: 1, missing: 'لوگوی نمایشگاه هنوز بارگذاری نشده' },
+  welcomeText: { label: 'جمله خوش‌آمد', step: 3, missing: 'جمله خوش‌آمد هنوز وارد نشده' },
+  letter: { label: 'متن دعوتنامه', step: 3, missing: 'متن دعوتنامه هنوز وارد نشده' },
+  tagline: { label: 'شعار شرکت', step: 3, missing: 'شعار شرکت هنوز وارد نشده' },
+  date: { label: 'تاریخ برگزاری', step: 4, missing: 'تاریخ هنوز وارد نشده' },
+  time: { label: 'ساعت برگزاری', step: 4, missing: 'ساعت برگزاری هنوز وارد نشده' },
+  location: { label: 'محل برگزاری', step: 4, missing: 'محل برگزاری هنوز وارد نشده' },
+  mapUrl: { label: 'لینک مسیریابی', step: 4, missing: 'لینک مسیریابی هنوز وارد نشده' },
+  booth: { label: 'شماره سالن و غرفه', step: 4, missing: 'شماره غرفه هنوز مشخص نشده' },
+  boothMap: { label: 'نقشه تعاملی غرفه', step: 4, missing: 'لینک نقشه غرفه هنوز وارد نشده' },
+  calendar: { label: 'دکمه‌های ثبت در تقویم', step: 4, missing: 'برای دکمه‌های تقویم، تاریخ لازم است' },
+  share: { label: 'دکمه اشتراک‌گذاری', step: 3, missing: '' },
+  video: { label: 'ویدئوی پس‌زمینه', step: 2, missing: 'ویدئوی پس‌زمینه انتخاب نشده' },
+  music: { label: 'موزیک پس‌زمینه', step: 2, missing: 'موزیک انتخاب نشده' },
+};
+export const ITEM_KEYS = Object.keys(ITEMS) as ItemKey[];
+
+const hasDates = (c: InvitationConfig) => !!(c.event.startDate && c.event.endDate);
+export const hasTimes = (c: InvitationConfig) => !!(c.event.startTime && c.event.endTime && c.event.endTime > c.event.startTime);
+
+/** Whether the item has content (independent of the hide flag). */
+export function isFilled(c: InvitationConfig, key: ItemKey): boolean {
+  switch (key) {
+    case 'logo':
+      return !!c.company.logo;
+    case 'icon':
+      return !!c.company.icon;
+    case 'badge':
+      return !!c.event.badge.trim();
+    case 'eventLogo':
+      return !!c.event.logo;
+    case 'welcomeText':
+      return !!c.event.welcomeText.trim();
+    case 'letter':
+      return !!c.texts.letter.trim();
+    case 'tagline':
+      return !!c.company.tagline.trim();
+    case 'date':
+      return hasDates(c) && c.event.endDate >= c.event.startDate;
+    case 'time':
+      return hasTimes(c);
+    case 'location':
+      return !!c.event.location.trim();
+    case 'mapUrl':
+      return !!safeUrl(c.event.mapUrl);
+    case 'booth':
+      return !!c.event.booth.trim();
+    case 'boothMap':
+      return !!safeUrl(c.event.boothMapUrl);
+    case 'calendar':
+      return hasDates(c) && c.event.endDate >= c.event.startDate;
+    case 'share':
+      return true;
+    case 'video':
+      return !!c.media.video;
+    case 'music':
+      return !!c.media.music;
+  }
+}
+
+export const isShown = (c: InvitationConfig, key: ItemKey): boolean =>
+  !c.hidden?.[key] && !(key === 'mapUrl' && c.hidden?.location); // no location row -> no map link either
+/** Shown on the invitation but has no content yet. */
+export const isMissing = (c: InvitationConfig, key: ItemKey) => isShown(c, key) && !isFilled(c, key);
+
 // ---------- validation / sanitising (shared by client and server) ----------
 
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
-export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
+export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -279,14 +342,16 @@ function num(v: unknown, fallback: number, min: number, max: number): number {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
 }
 
-/** Normalise untrusted input into a valid InvitationConfig. */
+/** Normalise untrusted input into a valid InvitationConfig (missing values stay empty). */
 export function sanitizeInvitation(input: any): InvitationConfig {
-  const d = DEFAULT_INVITATION;
+  const d = blankInvitation();
   const i = input ?? {};
   const fontOk = typeof i.theme?.font === 'string' && (i.theme.font === CUSTOM_FONT || FONTS.some(f => f.id === i.theme.font));
   const tz = typeof i.event?.timezone === 'string' && isValidTimezone(i.event.timezone) ? i.event.timezone : d.event.timezone;
+  const hidden: Partial<Record<ItemKey, boolean>> = {};
+  for (const k of ITEM_KEYS) if (i.hidden?.[k] === true) hidden[k] = true;
   return {
-    slug: typeof i.slug === 'string' ? i.slug.toLowerCase().trim() : '',
+    slug: typeof i.slug === 'string' ? i.slug.toLowerCase().trim().slice(0, 40) : '',
     company: {
       name: str(i.company?.name, '', LIMITS.short),
       tagline: str(i.company?.tagline, '', LIMITS.short),
@@ -295,28 +360,29 @@ export function sanitizeInvitation(input: any): InvitationConfig {
       shareImage: safeAsset(i.company?.shareImage),
     },
     event: {
-      badge: str(i.event?.badge, d.event.badge, LIMITS.short),
+      badge: str(i.event?.badge, '', LIMITS.short),
       title: str(i.event?.title, '', LIMITS.short),
       logo: safeAsset(i.event?.logo),
       welcomeText: str(i.event?.welcomeText, '', LIMITS.text),
       startDate: DATE_RE.test(i.event?.startDate) ? i.event.startDate : '',
       endDate: DATE_RE.test(i.event?.endDate) ? i.event.endDate : '',
-      startTime: TIME_RE.test(i.event?.startTime) ? i.event.startTime : d.event.startTime,
-      endTime: TIME_RE.test(i.event?.endTime) ? i.event.endTime : d.event.endTime,
+      startTime: TIME_RE.test(i.event?.startTime) ? i.event.startTime : '',
+      endTime: TIME_RE.test(i.event?.endTime) ? i.event.endTime : '',
       timezone: tz,
       dateLabel: str(i.event?.dateLabel, '', LIMITS.short),
       timeLabel: str(i.event?.timeLabel, '', LIMITS.short),
       location: str(i.event?.location, '', LIMITS.short),
-      mapUrl: safeUrl(str(i.event?.mapUrl, '', LIMITS.url)),
+      // Keep what the admin typed in drafts; it is checked (and must be valid) before publishing.
+      mapUrl: str(i.event?.mapUrl, '', LIMITS.url).trim(),
       booth: str(i.event?.booth, '', LIMITS.short),
-      boothMapUrl: safeUrl(str(i.event?.boothMapUrl, '', LIMITS.url)),
+      boothMapUrl: str(i.event?.boothMapUrl, '', LIMITS.url).trim(),
     },
     texts: {
       letter: str(i.texts?.letter, '', LIMITS.letter),
-      enterButton: str(i.texts?.enterButton, d.texts.enterButton, LIMITS.button) || d.texts.enterButton,
-      detailsButton: str(i.texts?.detailsButton, d.texts.detailsButton, LIMITS.button) || d.texts.detailsButton,
-      mapButton: str(i.texts?.mapButton, d.texts.mapButton, LIMITS.button) || d.texts.mapButton,
-      shareButton: str(i.texts?.shareButton, d.texts.shareButton, LIMITS.button) || d.texts.shareButton,
+      enterButton: str(i.texts?.enterButton, '', LIMITS.button) || d.texts.enterButton,
+      detailsButton: str(i.texts?.detailsButton, '', LIMITS.button) || d.texts.detailsButton,
+      mapButton: str(i.texts?.mapButton, '', LIMITS.button) || d.texts.mapButton,
+      shareButton: str(i.texts?.shareButton, '', LIMITS.button) || d.texts.shareButton,
       shareText: str(i.texts?.shareText, '', LIMITS.shareText),
     },
     theme: {
@@ -337,33 +403,57 @@ export function sanitizeInvitation(input: any): InvitationConfig {
       show: i.footer?.show !== false,
       text: str(i.footer?.text, '', LIMITS.short),
       subText: str(i.footer?.subText, '', LIMITS.short),
-      url: safeUrl(str(i.footer?.url, '', LIMITS.url)),
+      url: str(i.footer?.url, '', LIMITS.url).trim(),
     },
+    hidden,
   };
 }
 
-export type IssueField = 'slug' | 'company.name' | 'event.title' | 'event.dates' | 'event.time' | 'event.location' | 'event.mapUrl' | 'event.boothMapUrl' | 'footer.url' | 'theme.font';
+/** The version guests see: invalid links dropped (only ever called on validated data). */
+export function publicVersion(c: InvitationConfig): InvitationConfig {
+  return {
+    ...c,
+    event: { ...c.event, mapUrl: safeUrl(c.event.mapUrl), boothMapUrl: safeUrl(c.event.boothMapUrl) },
+    footer: { ...c.footer, url: safeUrl(c.footer.url) },
+  };
+}
+
+export type IssueField = 'slug' | 'company.name' | 'event.title' | 'event.dates' | 'event.time' | 'event.mapUrl' | 'event.boothMapUrl' | 'footer.url' | 'theme.font' | `item.${ItemKey}`;
 
 export interface Issue {
   field: IssueField;
   message: string;
+  /** Wizard step that fixes it */
+  step: number;
+  /** Item that can be hidden instead of filled */
+  item?: ItemKey;
 }
 
-/** Problems that block publishing (Persian messages, linked to the field they concern). */
+/**
+ * Everything that blocks publishing. Drafts can be saved with any of these open;
+ * every shown item must have content (or be hidden) before guests can see it.
+ */
 export function validateForPublish(c: InvitationConfig): Issue[] {
   const issues: Issue[] = [];
-  const add = (field: IssueField, message: string) => issues.push({ field, message });
-  if (!SLUG_RE.test(c.slug)) add('slug', 'آدرس لینک باید ۳ تا ۴۰ حرف انگلیسی کوچک، عدد یا خط تیره باشد.');
-  else if (RESERVED_SLUGS.has(c.slug)) add('slug', 'این آدرس رزرو شده است؛ آدرس دیگری انتخاب کنید.');
-  if (!c.company.name.trim()) add('company.name', 'نام شرکت وارد نشده است.');
-  if (!c.event.title.trim()) add('event.title', 'نام نمایشگاه وارد نشده است.');
-  if (!c.event.startDate || !c.event.endDate) add('event.dates', 'تاریخ شروع و پایان نمایشگاه مشخص نشده است.');
-  else if (c.event.endDate < c.event.startDate) add('event.dates', 'تاریخ پایان نباید قبل از تاریخ شروع باشد.');
-  if (c.event.endTime <= c.event.startTime) add('event.time', 'ساعت پایان باید بعد از ساعت شروع باشد.');
-  if (!c.event.location.trim()) add('event.location', 'محل برگزاری وارد نشده است.');
-  if (c.event.mapUrl && !safeUrl(c.event.mapUrl)) add('event.mapUrl', 'لینک مسیریابی معتبر نیست.');
-  if (c.event.boothMapUrl && !safeUrl(c.event.boothMapUrl)) add('event.boothMapUrl', 'لینک نقشه غرفه معتبر نیست.');
-  if (c.footer.url && !safeUrl(c.footer.url)) add('footer.url', 'لینک امضای پایین صفحه معتبر نیست.');
-  if (c.theme.font === CUSTOM_FONT && !c.theme.customFontUrl) add('theme.font', 'فایل فونت اختصاصی بارگذاری نشده است.');
+  const add = (field: IssueField, step: number, message: string, item?: ItemKey) => issues.push({ field, step, message, item });
+
+  if (!SLUG_RE.test(c.slug)) add('slug', 0, 'آدرس لینک انتخاب نشده یا معتبر نیست (۳ تا ۴۰ حرف انگلیسی کوچک، عدد یا خط تیره).');
+  else if (RESERVED_SLUGS.has(c.slug)) add('slug', 0, 'این آدرس رزرو شده است؛ آدرس دیگری انتخاب کنید.');
+  if (!c.company.name.trim()) add('company.name', 0, 'نام شرکت وارد نشده است.');
+  if (!c.event.title.trim()) add('event.title', 0, 'نام نمایشگاه وارد نشده است.');
+
+  for (const key of ITEM_KEYS) {
+    if (!isMissing(c, key)) continue;
+    if (key === 'calendar' && isShown(c, 'date')) continue; // already reported as missing date
+    add(`item.${key}`, ITEMS[key].step, `${ITEMS[key].missing}.`, key);
+  }
+
+  // Values that are present but wrong
+  if (c.event.startDate && c.event.endDate && c.event.endDate < c.event.startDate) add('event.dates', 4, 'تاریخ پایان نباید قبل از تاریخ شروع باشد.');
+  if (isShown(c, 'time') && c.event.startTime && c.event.endTime && c.event.endTime <= c.event.startTime) add('event.time', 4, 'ساعت پایان باید بعد از ساعت شروع باشد.');
+  if (isShown(c, 'mapUrl') && c.event.mapUrl && !safeUrl(c.event.mapUrl)) add('event.mapUrl', 4, 'لینک مسیریابی معتبر نیست.');
+  if (isShown(c, 'boothMap') && c.event.boothMapUrl && !safeUrl(c.event.boothMapUrl)) add('event.boothMapUrl', 4, 'لینک نقشه غرفه معتبر نیست.');
+  if (c.footer.show && c.footer.url && !safeUrl(c.footer.url)) add('footer.url', 3, 'لینک امضای پایین صفحه معتبر نیست.');
+  if (c.theme.font === CUSTOM_FONT && !c.theme.customFontUrl) add('theme.font', 1, 'فایل فونت اختصاصی بارگذاری نشده است.');
   return issues;
 }

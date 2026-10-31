@@ -3,7 +3,7 @@
 
 export const BASE: string = import.meta.env.BASE_URL || '/';
 
-/** Resolve a stored, base-relative asset path ("uploads/x.webp", "bg.mp4") to a URL. */
+/** Resolve a stored, base-relative asset path ("uploads/x.webp", "background-music.mp3") to a URL. */
 export const asset = (p: string) => (p ? BASE + p.replace(/^\/+/, '') : '');
 
 /** App-internal link, e.g. route('builder') -> "/in/builder". */
@@ -20,4 +20,5 @@ export function appPath(): string {
 }
 
 export const inviteUrl = (slug: string) => `${window.location.origin}${route(slug)}`;
-export const editUrl = (slug: string, token: string) => `${window.location.origin}${route(`builder/${slug}`)}#${token}`;
+export const editUrl = (id: string, token: string) => `${window.location.origin}${route(`builder/${id}`)}#${token}`;
+export const previewUrl = (id: string, token: string) => `${window.location.origin}${route(`preview/${id}`)}#${token}`;

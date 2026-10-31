@@ -8,12 +8,14 @@ import { appPath } from './lib/paths';
 // Guests only download the invitation viewer; the wizard and home page are separate chunks.
 const HomePage = lazy(() => import('./pages/HomePage'));
 const BuilderPage = lazy(() => import('./pages/BuilderPage'));
+const PreviewPage = lazy(() => import('./pages/PreviewPage'));
 
 function Router() {
   const path = appPath();
   let m: RegExpMatchArray | null;
   if (path === 'builder') return <BuilderPage />;
-  if ((m = path.match(/^builder\/([^/]+)$/))) return <BuilderPage editSlug={decodeURIComponent(m[1]).toLowerCase()} />;
+  if ((m = path.match(/^builder\/([^/]+)$/))) return <BuilderPage recordId={decodeURIComponent(m[1]).toLowerCase()} />;
+  if ((m = path.match(/^preview\/([^/]+)$/))) return <PreviewPage id={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^([^/]+)$/))) return <ViewerPage slug={decodeURIComponent(m[1]).toLowerCase()} />;
   return <HomePage />;
 }

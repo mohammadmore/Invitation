@@ -16,38 +16,87 @@ export function Section({ title, description, children, onFocusCapture }: { titl
   );
 }
 
+/** "Don't show" checkbox: removes the item from the invitation and from the publish checklist. */
+export interface HideProps {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}
+
+export function HideToggle({ checked, onChange }: HideProps) {
+  return (
+    <label className={`inline-flex items-center gap-1.5 text-[11px] font-bold cursor-pointer select-none rounded-lg px-2 py-1 transition ${checked ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="accent-slate-800 w-3.5 h-3.5" />
+      نمایش داده نشود
+    </label>
+  );
+}
+
 export function Field({
   label,
   hint,
   error,
+  warning,
   children,
   required,
   count,
+  hide,
+  action,
 }: {
   label: string;
   hint?: React.ReactNode;
   error?: string;
+  /** Non-blocking notice (e.g. "not entered yet") */
+  warning?: string;
   required?: boolean;
   /** [current length, max length] – shows a counter */
   count?: [number, number];
+  hide?: HideProps;
+  /** Extra control next to the label (e.g. "insert suggested text") */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const hidden = hide?.checked;
   return (
-    <label className="block">
-      <span className="flex items-center justify-between gap-2 text-sm font-bold text-slate-700 mb-1.5">
-        <span>
+    <div className="block">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1.5">
+        <span className="text-sm font-bold text-slate-700">
           {label}
           {required && <span className="text-rose-500 mr-1">*</span>}
         </span>
-        {count && count[0] > count[1] * 0.7 && (
-          <span className={`text-[11px] font-medium tabular-nums ${count[0] >= count[1] ? 'text-rose-600' : 'text-slate-400'}`}>
-            {faNum(count[0])} / {faNum(count[1])}
-          </span>
-        )}
-      </span>
-      {children}
-      {error ? <span className="block text-xs text-rose-600 mt-1.5">{error}</span> : hint && <span className="block text-xs text-slate-500 mt-1.5 leading-relaxed">{hint}</span>}
-    </label>
+        <span className="flex items-center gap-1">
+          {count && !hidden && count[0] > count[1] * 0.7 && (
+            <span className={`text-[11px] font-medium tabular-nums ${count[0] >= count[1] ? 'text-rose-600' : 'text-slate-400'}`}>
+              {faNum(count[0])} / {faNum(count[1])}
+            </span>
+          )}
+          {!hidden && action}
+          {hide && <HideToggle {...hide} />}
+        </span>
+      </div>
+      {hidden ? (
+        <p className="text-xs text-slate-500 bg-slate-100 rounded-xl px-3 py-2.5">این مورد در دعوتنامه نمایش داده نمی‌شود.</p>
+      ) : (
+        <>
+          {children}
+          {error ? (
+            <span className="block text-xs text-rose-600 mt-1.5">{error}</span>
+          ) : warning ? (
+            <span className="block text-xs text-amber-700 mt-1.5">{warning}</span>
+          ) : (
+            hint && <span className="block text-xs text-slate-500 mt-1.5 leading-relaxed">{hint}</span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Small "insert suggested text" button for a field. */
+export function SuggestButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="text-[11px] font-bold text-sky-600 hover:bg-sky-50 rounded-lg px-2 py-1">
+      درج متن پیشنهادی
+    </button>
   );
 }
 
@@ -70,11 +119,31 @@ export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
 }
 
 /** URL field: adds https:// on blur and flags values that aren't usable links. */
-export function UrlInput({ label, hint, value, onChange, placeholder = 'https://', extra }: { label: string; hint?: string; value: string; onChange: (v: string) => void; placeholder?: string; extra?: React.ReactNode }) {
+export function UrlInput({
+  label,
+  hint,
+  value,
+  onChange,
+  placeholder = 'https://',
+  extra,
+  hide,
+  warning,
+  forceError,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  extra?: React.ReactNode;
+  hide?: HideProps;
+  warning?: string;
+  forceError?: boolean;
+}) {
   const [touched, setTouched] = useState(false);
   const invalid = !!value.trim() && !safeUrl(value);
   return (
-    <Field label={label} hint={hint} error={touched && invalid ? 'این لینک معتبر نیست؛ آدرس کامل را وارد کنید، مثلاً https://neshan.org/...' : undefined}>
+    <Field label={label} hint={hint} hide={hide} warning={warning} error={(touched || forceError) && invalid ? 'این لینک معتبر نیست؛ آدرس کامل را وارد کنید، مثلاً https://neshan.org/...' : undefined}>
       <div className="flex gap-2">
         <TextInput
           ltr
@@ -224,6 +293,8 @@ export function ImageUpload({
   onChange,
   dark,
   maxImageDim,
+  hide,
+  warning,
 }: {
   label: string;
   hint?: string;
@@ -231,11 +302,13 @@ export function ImageUpload({
   onChange: (v: string) => void;
   dark?: boolean;
   maxImageDim?: number;
+  hide?: HideProps;
+  warning?: string;
 }) {
   const [broken, setBroken] = useState(false);
   React.useEffect(() => setBroken(false), [value]);
   return (
-    <Field label={label} hint={hint}>
+    <Field label={label} hint={hint} hide={hide} warning={warning}>
       <div className="flex items-center gap-4">
         <div className={`w-28 h-20 rounded-2xl border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 ${dark ? 'bg-slate-800' : 'bg-[repeating-conic-gradient(#f1f5f9_0_25%,white_0_50%)] bg-[length:16px_16px]'}`}>
           {value && !broken ? (

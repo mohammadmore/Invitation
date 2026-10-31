@@ -12,7 +12,7 @@ import {
   DEFAULT_FOOTER,
   RESERVED_SLUGS,
   SLUG_RE,
-  DEFAULT_INVITATION,
+  publicVersion,
   sanitizeInvitation,
   validateForPublish,
   type InvitationConfig,
@@ -58,50 +58,91 @@ const ffmpegAvailable = (() => {
 })();
 
 // ---------------------------------------------------------------- storage
+//
+// One JSON file per invitation, named by an internal id. Each record keeps the
+// working copy ("draft", may be incomplete) and the version guests see
+// ("published", only ever written after full validation).
 
-interface StoredInvitation {
-  config: InvitationConfig;
+interface InvitationRecord {
+  id: string;
+  draft: InvitationConfig;
+  published: InvitationConfig | null;
+  publishedAt: string | null;
   editTokenHash: string;
+  /** Read-only token for the client preview link (shows missing items in red) */
+  previewToken: string;
   createdAt: string;
   updatedAt: string;
 }
 
+const ID_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 const newToken = () => crypto.randomBytes(24).toString('base64url');
-const fileFor = (slug: string) => path.join(INVITES_DIR, `${slug}.json`);
+const newId = () => `d${crypto.randomBytes(6).toString('hex')}`;
+const fileFor = (id: string) => path.join(INVITES_DIR, `${id}.json`);
 
-async function readInvitation(slug: string): Promise<StoredInvitation | null> {
-  if (!SLUG_RE.test(slug)) return null;
+/** slug -> id of the record that owns it (published slug, or the slug a draft has reserved) */
+const slugIndex = new Map<string, string>();
+const claimedSlug = (r: InvitationRecord) => r.published?.slug || (SLUG_RE.test(r.draft.slug) ? r.draft.slug : '');
+
+async function readRecord(id: string): Promise<InvitationRecord | null> {
+  if (!ID_RE.test(id)) return null;
   try {
-    const rec = JSON.parse(await fs.readFile(fileFor(slug), 'utf8'));
-    rec.config = sanitizeInvitation(rec.config); // also migrates older records
-    return rec;
+    const raw = JSON.parse(await fs.readFile(fileFor(id), 'utf8'));
+    if (!raw.draft && raw.config) {
+      // Migrate the earlier format ({ config, editTokenHash }): it was published.
+      const config = sanitizeInvitation(raw.config);
+      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt };
+    }
+    raw.draft = sanitizeInvitation(raw.draft);
+    raw.published = raw.published ? sanitizeInvitation(raw.published) : null;
+    return raw;
   } catch {
     return null;
   }
 }
 
-async function writeInvitation(rec: StoredInvitation, { create = false } = {}) {
-  const target = fileFor(rec.config.slug);
-  const data = JSON.stringify(rec, null, 2);
-  if (create) {
-    // 'wx' fails if the file exists: two simultaneous creates can't overwrite each other.
-    await fs.writeFile(target, data, { flag: 'wx' });
-    return;
-  }
+async function writeRecord(rec: InvitationRecord) {
+  const target = fileFor(rec.id);
   const tmp = `${target}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(tmp, data);
+  await fs.writeFile(tmp, JSON.stringify(rec, null, 2));
   await fs.rename(tmp, target);
+  for (const [slug, id] of slugIndex) if (id === rec.id) slugIndex.delete(slug);
+  const slug = claimedSlug(rec);
+  if (slug) slugIndex.set(slug, rec.id);
 }
 
-async function allInvitations(): Promise<StoredInvitation[]> {
+async function allRecords(): Promise<InvitationRecord[]> {
   const files = (await fs.readdir(INVITES_DIR)).filter(f => f.endsWith('.json'));
-  const recs = await Promise.all(files.map(f => readInvitation(f.slice(0, -5))));
-  return recs.filter((r): r is StoredInvitation => !!r);
+  const recs = await Promise.all(files.map(f => readRecord(f.slice(0, -5))));
+  return recs.filter((r): r is InvitationRecord => !!r);
+}
+
+async function buildSlugIndex() {
+  slugIndex.clear();
+  for (const r of await allRecords()) {
+    const slug = claimedSlug(r);
+    if (slug && !slugIndex.has(slug)) slugIndex.set(slug, r.id);
+  }
+}
+
+async function publishedBySlug(slug: string): Promise<InvitationConfig | null> {
+  const id = slugIndex.get(slug);
+  const rec = id ? await readRecord(id) : null;
+  return rec?.published && rec.published.slug === slug ? publicVersion(rec.published) : null;
+}
+
+/** Serialises slug claims so two saves can't grab the same address at once. */
+let slugLock: Promise<unknown> = Promise.resolve();
+function withSlugLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = slugLock.then(fn, fn);
+  slugLock = run.catch(() => {});
+  return run;
 }
 
 /** Uploaded files referenced by an invitation. */
-function uploadsOf(c: InvitationConfig): string[] {
+function uploadsOf(c: InvitationConfig | null): string[] {
+  if (!c) return [];
   return [c.company.logo, c.company.icon, c.company.shareImage, c.event.logo, c.theme.customFontUrl, c.media.video, c.media.videoPoster, c.media.music]
     .filter(p => p.startsWith('uploads/'))
     .map(p => p.slice('uploads/'.length));
@@ -115,11 +156,11 @@ async function dirSize(dir: string) {
 }
 
 /**
- * Delete uploads no invitation references any more. Files younger than the grace period
- * are kept because they may belong to a wizard draft that hasn't been published yet.
+ * Delete uploads no invitation (draft or published) references any more. Files younger than
+ * the grace period are kept: they may belong to a wizard session that hasn't saved yet.
  */
 async function collectGarbage(graceMs = UPLOAD_GRACE_DAYS * 86_400_000, only?: Set<string>) {
-  const used = new Set((await allInvitations()).flatMap(r => uploadsOf(r.config)));
+  const used = new Set((await allRecords()).flatMap(r => [...uploadsOf(r.draft), ...uploadsOf(r.published)]));
   const now = Date.now();
   let removed = 0;
   for (const f of await fs.readdir(UPLOADS_DIR)) {
@@ -132,15 +173,6 @@ async function collectGarbage(graceMs = UPLOAD_GRACE_DAYS * 86_400_000, only?: S
   }
   uploadsBytes = await dirSize(UPLOADS_DIR);
   if (removed) console.log(`[gc] removed ${removed} unused upload(s)`);
-}
-
-async function seedDefault() {
-  const files = await fs.readdir(INVITES_DIR);
-  if (files.some(f => f.endsWith('.json'))) return;
-  const token = newToken();
-  const now = new Date().toISOString();
-  await writeInvitation({ config: { ...DEFAULT_INVITATION, slug: 'behansar' }, editTokenHash: sha256(token), createdAt: now, updatedAt: now });
-  console.log(`[seed] Created sample invitation ${BASE_PATH}/behansar  (edit: ${BASE_PATH}/builder/behansar#${token})`);
 }
 
 // ---------------------------------------------------------------- rate limiting (in-memory)
@@ -194,7 +226,7 @@ function isAdmin(req: Request): boolean {
 /** Creating invitations / uploading is open only when no ADMIN_PASSWORD is configured (dev or ALLOW_OPEN_ACCESS). */
 const canCreate = (req: Request) => !ADMIN_PASSWORD || isAdmin(req);
 const canEditFooter = canCreate;
-function canEdit(req: Request, rec: StoredInvitation): boolean {
+function canEdit(req: Request, rec: InvitationRecord): boolean {
   if (isAdmin(req)) return true;
   const token = String(req.get('x-edit-token') || '');
   if (!token) return false;
@@ -232,101 +264,169 @@ api.post('/auth', (req, res) => {
 api.get('/slug/:slug', limit('slug', 120, 60_000), async (req, res) => {
   const slug = req.params.slug.toLowerCase();
   if (!SLUG_RE.test(slug) || RESERVED_SLUGS.has(slug)) return res.json({ available: false, valid: false });
-  res.json({ available: !(await readInvitation(slug)), valid: true });
+  const owner = slugIndex.get(slug);
+  res.json({ available: !owner || owner === String(req.query.id || ''), valid: true });
 });
 
-api.get('/invitations', async (req, res) => {
-  if (!isAdmin(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
-  res.json(
-    (await allInvitations())
-      .map(r => ({ slug: r.config.slug, company: r.config.company.name, event: r.config.event.title, updatedAt: r.updatedAt }))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-  );
-});
+// ----- public (guests)
 
 api.get('/invitations/:slug', async (req, res) => {
-  const rec = await readInvitation(req.params.slug.toLowerCase());
-  if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
+  const config = await publishedBySlug(req.params.slug.toLowerCase());
+  if (!config) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   res.set('Cache-Control', 'no-cache');
-  res.json(rec.config);
+  res.json(config);
 });
 
 /** Real .ics download – far more reliable than data: URLs on iPhone and in-app browsers. */
 api.get('/invitations/:slug/ics', async (req, res) => {
-  const rec = await readInvitation(req.params.slug.toLowerCase());
-  if (!rec || !rec.config.event.startDate) return res.status(404).type('text').send('Not found');
-  res.set({
-    'Content-Type': 'text/calendar; charset=utf-8',
-    'Content-Disposition': `attachment; filename="${rec.config.slug}.ics"`,
-    'Cache-Control': 'no-cache',
-  });
-  res.send(icsContent(rec.config));
+  const config = await publishedBySlug(req.params.slug.toLowerCase());
+  if (!config || !config.event.startDate) return res.status(404).type('text').send('Not found');
+  res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': `attachment; filename="${config.slug}.ics"`, 'Cache-Control': 'no-cache' });
+  res.send(icsContent(config));
 });
+
+/** Client preview of an unpublished draft (read-only link shared with the client). */
+api.get('/preview/:id', limit('preview', 120, 60_000), async (req, res) => {
+  const rec = await readRecord(req.params.id);
+  if (!rec || !safeEqual(String(req.query.k || ''), rec.previewToken)) return res.status(404).json({ error: 'پیش‌نمایش پیدا نشد' });
+  res.set('Cache-Control', 'no-store');
+  res.json({ config: rec.draft, published: !!rec.published, updatedAt: rec.updatedAt });
+});
+
+// ----- records (admin / owner)
 
 const json = express.json({ limit: '256kb' });
 
-function firstIssue(config: InvitationConfig) {
-  const issues = validateForPublish(config);
-  return issues.length ? { error: issues.map(i => i.message).join('\n'), field: issues[0].field } : null;
+type RecordSummary = { id: string; slug: string; company: string; event: string; status: 'draft' | 'published' | 'changed'; updatedAt: string };
+const summarize = (r: InvitationRecord): RecordSummary => ({
+  id: r.id,
+  slug: claimedSlug(r),
+  company: r.draft.company.name,
+  event: r.draft.event.title,
+  status: !r.published ? 'draft' : JSON.stringify(r.published) === JSON.stringify(r.draft) ? 'published' : 'changed',
+  updatedAt: r.updatedAt,
+});
+
+const recordView = (r: InvitationRecord) => ({ ...summarize(r), draft: r.draft, previewToken: r.previewToken, publishedAt: r.publishedAt, publishedSlug: r.published?.slug ?? '' });
+
+api.get('/records', async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
+  res.json((await allRecords()).map(summarize).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+});
+
+/**
+ * Apply a draft from the wizard. Never rejects incomplete data – the admin's work is always
+ * kept. If the requested address belongs to another invitation, everything else is saved and
+ * the address is left empty (reported back as slugConflict).
+ */
+function applyDraft(req: Request, rec: InvitationRecord | null, input: unknown): { draft: InvitationConfig; slugConflict: boolean } {
+  const draft = sanitizeInvitation(input);
+  if (!canEditFooter(req)) draft.footer = rec ? rec.draft.footer : { ...DEFAULT_FOOTER };
+  if (rec?.published) draft.slug = rec.published.slug; // published address is permanent
+  let slugConflict = false;
+  if (SLUG_RE.test(draft.slug)) {
+    const owner = slugIndex.get(draft.slug);
+    if (RESERVED_SLUGS.has(draft.slug) || (owner && owner !== rec?.id)) {
+      slugConflict = true;
+      draft.slug = '';
+    }
+  }
+  return { draft, slugConflict };
 }
 
-api.post('/invitations', limit('create', 30, 3_600_000), json, async (req, res) => {
+api.post('/records', limit('create', 60, 3_600_000), json, async (req, res) => {
   if (!canCreate(req)) return res.status(401).json({ error: 'رمز مدیر نادرست است' });
-  const config = sanitizeInvitation(req.body?.config);
-  if (!canEditFooter(req)) config.footer = { ...DEFAULT_FOOTER };
-  const problem = firstIssue(config);
-  if (problem) return res.status(400).json(problem);
-
   const editToken = newToken();
   const now = new Date().toISOString();
-  try {
-    await writeInvitation({ config, editTokenHash: sha256(editToken), createdAt: now, updatedAt: now }, { create: true });
-  } catch (e: any) {
-    if (e?.code === 'EEXIST') return res.status(409).json({ error: 'این آدرس قبلاً استفاده شده است؛ آدرس دیگری انتخاب کنید.', field: 'slug' });
-    throw e;
-  }
-  res.status(201).json({ slug: config.slug, editToken });
+  const result = await withSlugLock(async () => {
+    const { draft, slugConflict } = applyDraft(req, null, req.body?.config);
+    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now };
+    await writeRecord(rec);
+    return { rec, slugConflict };
+  });
+  res.status(201).json({ ...recordView(result.rec), editToken, slugConflict: result.slugConflict });
 });
 
-api.put('/invitations/:slug', json, async (req, res) => {
-  const slug = req.params.slug.toLowerCase();
-  const rec = await readInvitation(slug);
+api.get('/records/:id', async (req, res) => {
+  const rec = await readRecord(req.params.id);
   if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   if (!canEdit(req, rec)) return res.status(401).json({ error: 'اجازه ویرایش این دعوتنامه را ندارید' });
-  const config = sanitizeInvitation({ ...req.body?.config, slug });
-  if (!canEditFooter(req)) config.footer = rec.config.footer;
-  const problem = firstIssue(config);
-  if (problem) return res.status(400).json(problem);
-  await writeInvitation({ ...rec, config, updatedAt: new Date().toISOString() });
-  res.json({ slug });
+  res.json(recordView(rec));
 });
 
-api.post('/invitations/:slug/token', async (req, res) => {
+api.put('/records/:id', json, async (req, res) => {
+  const out = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return { status: 404, body: { error: 'دعوتنامه پیدا نشد' } };
+    if (!canEdit(req, rec)) return { status: 401, body: { error: 'اجازه ویرایش این دعوتنامه را ندارید' } };
+    const { draft, slugConflict } = applyDraft(req, rec, req.body?.config);
+    const next = { ...rec, draft, updatedAt: new Date().toISOString() };
+    await writeRecord(next);
+    return { status: 200, body: { ...recordView(next), slugConflict } };
+  });
+  res.status(out.status).json(out.body);
+});
+
+api.post('/records/:id/publish', json, async (req, res) => {
+  const out = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return { status: 404, body: { error: 'دعوتنامه پیدا نشد' } };
+    if (!canEdit(req, rec)) return { status: 401, body: { error: 'اجازه انتشار این دعوتنامه را ندارید' } };
+    // Save the latest wizard state first (if sent), then validate it.
+    const { draft, slugConflict } = req.body?.config ? applyDraft(req, rec, req.body.config) : { draft: rec.draft, slugConflict: false };
+    if (slugConflict) {
+      await writeRecord({ ...rec, draft, updatedAt: new Date().toISOString() });
+      return { status: 409, body: { error: 'این آدرس لینک متعلق به دعوتنامه دیگری است؛ آدرس دیگری انتخاب کنید.', field: 'slug' } };
+    }
+    const issues = validateForPublish(draft);
+    if (issues.length) {
+      await writeRecord({ ...rec, draft, updatedAt: new Date().toISOString() });
+      return { status: 400, body: { error: 'اطلاعات دعوتنامه کامل نیست.', issues } };
+    }
+    const now = new Date().toISOString();
+    const next: InvitationRecord = { ...rec, draft, published: draft, publishedAt: now, updatedAt: now };
+    await writeRecord(next);
+    return { status: 200, body: recordView(next) };
+  });
+  res.status(out.status).json(out.body);
+});
+
+/** Take an invitation offline again (it becomes a draft; the address stays reserved). */
+api.post('/records/:id/unpublish', async (req, res) => {
+  const rec = await readRecord(req.params.id);
+  if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
+  if (!canEdit(req, rec)) return res.status(401).json({ error: 'اجازه این کار را ندارید' });
+  const next = { ...rec, draft: { ...rec.draft, slug: rec.published?.slug || rec.draft.slug }, published: null, publishedAt: null, updatedAt: new Date().toISOString() };
+  await writeRecord(next);
+  res.json(recordView(next));
+});
+
+api.post('/records/:id/token', async (req, res) => {
   if (!isAdmin(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
-  const rec = await readInvitation(req.params.slug.toLowerCase());
+  const rec = await readRecord(req.params.id);
   if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   const editToken = newToken();
-  await writeInvitation({ ...rec, editTokenHash: sha256(editToken) });
+  await writeRecord({ ...rec, editTokenHash: sha256(editToken) });
   res.json({ editToken });
 });
 
-api.delete('/invitations/:slug', async (req, res) => {
-  const slug = req.params.slug.toLowerCase();
-  const rec = await readInvitation(slug);
+api.delete('/records/:id', async (req, res) => {
+  const rec = await readRecord(req.params.id);
   if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   if (!canEdit(req, rec)) return res.status(401).json({ error: 'اجازه حذف این دعوتنامه را ندارید' });
-  await fs.rm(fileFor(slug));
+  await fs.rm(fileFor(rec.id));
+  for (const [slug, id] of slugIndex) if (id === rec.id) slugIndex.delete(slug);
   // Remove this invitation's files right away (unless another invitation uses them too).
-  await collectGarbage(0, new Set(uploadsOf(rec.config)));
+  await collectGarbage(0, new Set([...uploadsOf(rec.draft), ...uploadsOf(rec.published)]));
   res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------- uploads
 
-/** Uploads are allowed for creators, or for the owner of an existing invitation (x-edit-slug + x-edit-token). */
+/** Uploads are allowed for creators, or for the owner of an existing invitation (x-edit-id + x-edit-token). */
 async function canUpload(req: Request) {
   if (canCreate(req)) return true;
-  const rec = await readInvitation(String(req.get('x-edit-slug') || '').toLowerCase());
+  const rec = await readRecord(String(req.get('x-edit-id') || ''));
   return !!rec && canEdit(req, rec);
 }
 
@@ -431,12 +531,12 @@ const relPath = (req: Request) => req.path.replace(/^\/+|\/+$/g, '');
 async function renderPage(html: string, req: Request): Promise<{ status: number; html: string }> {
   const rel = relPath(req);
   if (!rel || rel === 'builder' || rel.startsWith('builder/')) return { status: 200, html };
+  if (rel.startsWith('preview/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
   if (rel.includes('/')) return { status: 404, html };
   const slug = decodeURIComponent(rel).toLowerCase();
-  const rec = await readInvitation(slug);
-  if (!rec) return { status: 404, html };
+  const c = await publishedBySlug(slug);
+  if (!c) return { status: 404, html };
 
-  const c = rec.config;
   const base = publicBase(req);
   const title = `${c.event.badge || 'دعوتنامه'} ${c.event.title} | ${c.company.name}`;
   const desc = [c.event.welcomeText, c.event.dateLabel, c.event.location].filter(Boolean).join(' - ') || title;
@@ -464,7 +564,7 @@ async function renderPage(html: string, req: Request): Promise<{ status: number;
 }
 
 async function start() {
-  await seedDefault();
+  await buildSlugIndex();
   await collectGarbage();
   setInterval(() => collectGarbage().catch(console.error), 6 * 3_600_000).unref();
 

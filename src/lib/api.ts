@@ -1,4 +1,4 @@
-import type { InvitationConfig, IssueField } from '../shared/invitation';
+import type { InvitationConfig, Issue, IssueField } from '../shared/invitation';
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, VIDEO_WARN_MB, type UploadKind } from '../shared/uploads';
 import { apiUrl } from './paths';
 
@@ -12,7 +12,7 @@ export const getAdminPassword = () => sessionStorage.getItem(ADMIN_KEY) || '';
 export const setAdminPassword = (p: string) => (p ? sessionStorage.setItem(ADMIN_KEY, p) : sessionStorage.removeItem(ADMIN_KEY));
 
 /** Credentials for the invitation currently being edited (sent with uploads/updates). */
-let editAuth: { slug: string; token: string } | null = null;
+let editAuth: { id: string; token: string } | null = null;
 export const setEditAuth = (a: typeof editAuth) => (editAuth = a);
 
 function authHeaders(): Record<string, string> {
@@ -20,7 +20,7 @@ function authHeaders(): Record<string, string> {
   const admin = getAdminPassword();
   if (admin) h['x-admin-password'] = admin;
   if (editAuth) {
-    h['x-edit-slug'] = editAuth.slug;
+    h['x-edit-id'] = editAuth.id;
     h['x-edit-token'] = editAuth.token;
   }
   return h;
@@ -31,6 +31,7 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public field?: IssueField,
+    public issues?: Issue[],
   ) {
     super(message);
   }
@@ -48,7 +49,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError('ارتباط با سرور برقرار نشد؛ اتصال اینترنت را بررسی کنید.', 0);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error || `خطا (${res.status})`, res.status, data.field);
+  if (!res.ok) throw new ApiError(data.error || `خطا (${res.status})`, res.status, data.field, data.issues);
   return data as T;
 }
 
@@ -57,17 +58,42 @@ export interface ServerMeta {
   videoProcessing: boolean;
 }
 
+export type RecordStatus = 'draft' | 'published' | 'changed';
+
+export interface RecordSummary {
+  id: string;
+  slug: string;
+  company: string;
+  event: string;
+  status: RecordStatus;
+  updatedAt: string;
+}
+
+export interface RecordView extends RecordSummary {
+  draft: InvitationConfig;
+  previewToken: string;
+  publishedAt: string | null;
+  publishedSlug: string;
+}
+
 export const api = {
   meta: () => request<ServerMeta>('GET', 'meta'),
   auth: () => request<{ ok: boolean; admin: boolean }>('POST', 'auth'),
-  slugAvailable: (slug: string) => request<{ available: boolean; valid: boolean }>('GET', `slug/${encodeURIComponent(slug)}`),
+  slugAvailable: (slug: string, ownId?: string) =>
+    request<{ available: boolean; valid: boolean }>('GET', `slug/${encodeURIComponent(slug)}${ownId ? `?id=${encodeURIComponent(ownId)}` : ''}`),
+  /** Published invitation (guests) */
   get: (slug: string) => request<InvitationConfig>('GET', `invitations/${encodeURIComponent(slug)}`),
-  list: () => request<{ slug: string; company: string; event: string; updatedAt: string }[]>('GET', 'invitations'),
-  create: (config: InvitationConfig) => request<{ slug: string; editToken: string }>('POST', 'invitations', { config }),
-  update: (slug: string, config: InvitationConfig) => request<{ slug: string }>('PUT', `invitations/${encodeURIComponent(slug)}`, { config }),
-  remove: (slug: string) => request<{ ok: boolean }>('DELETE', `invitations/${encodeURIComponent(slug)}`),
+  /** Draft preview for the client (read-only token) */
+  preview: (id: string, token: string) => request<{ config: InvitationConfig; published: boolean; updatedAt: string }>('GET', `preview/${encodeURIComponent(id)}?k=${encodeURIComponent(token)}`),
+  list: () => request<RecordSummary[]>('GET', 'records'),
+  getRecord: (id: string) => request<RecordView>('GET', `records/${encodeURIComponent(id)}`),
+  createRecord: (config: InvitationConfig) => request<RecordView & { editToken: string; slugConflict: boolean }>('POST', 'records', { config }),
+  saveRecord: (id: string, config: InvitationConfig) => request<RecordView & { slugConflict: boolean }>('PUT', `records/${encodeURIComponent(id)}`, { config }),
+  publish: (id: string, config: InvitationConfig) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/publish`, { config }),
+  unpublish: (id: string) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/unpublish`),
+  remove: (id: string) => request<{ ok: boolean }>('DELETE', `records/${encodeURIComponent(id)}`),
   /** Admin only: issue a new edit link (the old one stops working). */
-  resetToken: (slug: string) => request<{ editToken: string }>('POST', `invitations/${encodeURIComponent(slug)}/token`),
+  resetToken: (id: string) => request<{ editToken: string }>('POST', `records/${encodeURIComponent(id)}/token`),
 };
 
 // ------------------------------------------------------------------ uploads
@@ -231,8 +257,9 @@ export async function uploadFile(
 // ---------- invitations created from this browser ----------
 
 export interface MyInvitation {
-  slug: string;
+  id: string;
   editToken: string;
+  slug: string;
   company: string;
   event: string;
   createdAt: string;
@@ -240,17 +267,26 @@ export interface MyInvitation {
 
 export function getMyInvitations(): MyInvitation[] {
   try {
-    return JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
+    // Entries from the earlier format (keyed by slug, no id) can't be used with the new API.
+    return (JSON.parse(localStorage.getItem(MINE_KEY) || '[]') as MyInvitation[]).filter(i => i && i.id && i.editToken);
   } catch {
     return [];
   }
 }
 
 export function saveMyInvitation(item: MyInvitation) {
-  const list = getMyInvitations().filter(i => i.slug !== item.slug);
+  const list = getMyInvitations().filter(i => i.id !== item.id);
   localStorage.setItem(MINE_KEY, JSON.stringify([item, ...list]));
 }
 
-export function forgetMyInvitation(slug: string) {
-  localStorage.setItem(MINE_KEY, JSON.stringify(getMyInvitations().filter(i => i.slug !== slug)));
+export function updateMyInvitation(id: string, patch: Partial<MyInvitation>) {
+  const list = getMyInvitations();
+  const i = list.find(x => x.id === id);
+  if (!i) return;
+  Object.assign(i, patch);
+  localStorage.setItem(MINE_KEY, JSON.stringify(list));
+}
+
+export function forgetMyInvitation(id: string) {
+  localStorage.setItem(MINE_KEY, JSON.stringify(getMyInvitations().filter(i => i.id !== id)));
 }
