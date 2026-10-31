@@ -21,7 +21,21 @@ import {
 } from '../src/shared/invitation';
 import { eventEnded, icsContent } from '../src/shared/calendar';
 import { repVcardContent, vcardContent } from '../src/shared/vcard';
-import { CODE_RE, emptyTracking, publicLink, publicTracking, sanitizeTracking, type Tracking } from '../src/shared/tracking';
+import { CODE_RE, channelLabel, emptyTracking, publicLink, publicTracking, sanitizeTracking, type Tracking } from '../src/shared/tracking';
+import {
+  DEFAULT_NOTIFY,
+  DEFAULT_SMS_SETTINGS,
+  formatMobile,
+  maskSmsSettings,
+  parseNumbers,
+  renderTemplate,
+  sanitizeNotify,
+  sanitizeSmsSettings,
+  type NotifyLogEntry,
+  type NotifySettings,
+  type SmsSettings,
+} from '../src/shared/notify';
+import { sendSms } from './sms';
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, type UploadKind } from '../src/shared/uploads';
 
 // Node 18 has no global WebCrypto by default; shared code (src/shared/tracking.ts) uses it.
@@ -42,6 +56,8 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(APP_ROOT, 'data'
 const INVITES_DIR = path.join(DATA_DIR, 'invitations');
 const RSVP_DIR = path.join(DATA_DIR, 'rsvp');
 const STATS_DIR = path.join(DATA_DIR, 'stats');
+const NOTIFY_DIR = path.join(DATA_DIR, 'notify');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ALLOW_OPEN_ACCESS = process.env.ALLOW_OPEN_ACCESS === 'true';
@@ -58,6 +74,7 @@ if (isProd && !ADMIN_PASSWORD && !ALLOW_OPEN_ACCESS) {
 mkdirSync(INVITES_DIR, { recursive: true });
 mkdirSync(RSVP_DIR, { recursive: true });
 mkdirSync(STATS_DIR, { recursive: true });
+mkdirSync(NOTIFY_DIR, { recursive: true });
 mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const ffmpegAvailable = (() => {
@@ -92,6 +109,8 @@ interface InvitationRecord {
   feedback: Feedback[];
   /** Sales reps, tracked links and their options – live, not part of draft/publish */
   tracking: Tracking;
+  /** SMS notification rules for attendance confirmations – live */
+  notify: NotifySettings;
 }
 
 interface Snapshot {
@@ -132,7 +151,7 @@ async function readRecord(id: string): Promise<InvitationRecord | null> {
     if (!raw.draft && raw.config) {
       // Migrate the earlier format ({ config, editTokenHash }): it was published.
       const config = sanitizeInvitation(raw.config);
-      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt, revision: 1, history: [], feedback: [], tracking: emptyTracking() };
+      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt, revision: 1, history: [], feedback: [], tracking: emptyTracking(), notify: { ...DEFAULT_NOTIFY } };
     }
     raw.draft = sanitizeInvitation(raw.draft);
     raw.published = raw.published ? sanitizeInvitation(raw.published) : null;
@@ -140,6 +159,7 @@ async function readRecord(id: string): Promise<InvitationRecord | null> {
     raw.history = Array.isArray(raw.history) ? raw.history.map((h: Snapshot) => ({ ...h, draft: sanitizeInvitation(h.draft) })) : [];
     raw.feedback = Array.isArray(raw.feedback) ? raw.feedback : [];
     raw.tracking = raw.tracking ? sanitizeTracking(raw.tracking) : emptyTracking();
+    raw.notify = sanitizeNotify(raw.notify);
     return raw;
   } catch {
     return null;
@@ -320,7 +340,7 @@ api.use((req, res, next) => {
 api.use(limit('api', 600, 60_000));
 
 api.get('/meta', (_req, res) => {
-  res.json({ adminRequired: !!ADMIN_PASSWORD, videoProcessing: ffmpegAvailable });
+  res.json({ adminRequired: !!ADMIN_PASSWORD, videoProcessing: ffmpegAvailable, smsReady: smsSettings.provider !== 'none' });
 });
 
 api.post('/auth', (req, res) => {
@@ -461,6 +481,7 @@ api.post('/invitations/:slug/rsvp', limit('rsvp', 10, 3_600_000), express.json({
   };
   await addRsvp(rec.id, entry);
   bumpStat(rec.id, 'rsvp', attrKey, entry.utm);
+  notifyRsvp(rec, config, entry, repOf, link).catch(console.error);
   res.status(201).json({ ok: true });
 });
 
@@ -636,7 +657,7 @@ api.post('/records', limit('create', 60, 3_600_000), json, async (req, res) => {
   const now = new Date().toISOString();
   const result = await withSlugLock(async () => {
     const { draft, slugConflict } = applyDraft(req, null, req.body?.config);
-    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking: emptyTracking() };
+    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking: emptyTracking(), notify: { ...DEFAULT_NOTIFY } };
     await writeRecord(rec);
     return { rec, slugConflict };
   });
@@ -727,6 +748,7 @@ api.delete('/records/:id', async (req, res) => {
   await fs.rm(fileFor(rec.id));
   await fs.rm(rsvpFile(rec.id), { force: true });
   await fs.rm(statsFile(rec.id), { force: true });
+  await fs.rm(notifyFile(rec.id), { force: true });
   statsCache.delete(rec.id);
   dirtyStats.delete(rec.id);
   for (const [slug, id] of slugIndex) if (id === rec.id) slugIndex.delete(slug);
@@ -796,7 +818,8 @@ api.post('/records/:id/duplicate', limit('create', 60, 3_600_000), json, async (
   if (!canEditFooter(req)) draft.footer = { ...DEFAULT_FOOTER };
   // Same organiser → keep its sales reps, links and tracking options (new report tokens).
   const tracking = mode === 'newEvent' ? sanitizeTracking({ ...rec.tracking, reps: rec.tracking.reps.map(r => ({ ...r, reportToken: '' })) }) : emptyTracking();
-  const copy: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking };
+  const notify = mode === 'newEvent' ? rec.notify : { ...DEFAULT_NOTIFY };
+  const copy: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking, notify };
   await writeRecord(copy);
   res.status(201).json({ ...(await recordView(copy)), editToken });
 });
@@ -840,6 +863,159 @@ api.get('/records/:id/stats', async (req, res) => {
   if (!rec) return;
   const stats = await loadStats(rec.id);
   res.set('Cache-Control', 'no-store').json({ totals: statTotals(stats.days), ...stats });
+});
+
+// ----- system settings (SMS panel) – admin only, stored on the server, never hard-coded
+
+let smsSettings: SmsSettings = { ...DEFAULT_SMS_SETTINGS };
+async function loadSettings() {
+  try {
+    const raw = JSON.parse(await fs.readFile(SETTINGS_FILE, 'utf8'));
+    smsSettings = sanitizeSmsSettings(raw.sms, { ...DEFAULT_SMS_SETTINGS, ...(raw.sms ?? {}) });
+  } catch {
+    /* defaults */
+  }
+}
+async function saveSettings() {
+  const tmp = `${SETTINGS_FILE}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify({ sms: smsSettings }, null, 2), { mode: 0o600 });
+  await fs.rename(tmp, SETTINGS_FILE);
+}
+/** Settings hold credentials: admin only (or local development without an admin password). */
+const canManageSettings = (req: Request) => (ADMIN_PASSWORD ? isAdmin(req) : !isProd);
+
+api.get('/settings', (req, res) => {
+  if (!canManageSettings(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
+  res.set('Cache-Control', 'no-store').json({ sms: maskSmsSettings(smsSettings), sentToday: smsCountToday() });
+});
+
+api.put('/settings', express.json({ limit: '64kb' }), async (req, res) => {
+  if (!canManageSettings(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
+  smsSettings = sanitizeSmsSettings(req.body?.sms, smsSettings);
+  await saveSettings();
+  res.json({ sms: maskSmsSettings(smsSettings), sentToday: smsCountToday() });
+});
+
+api.post('/settings/test-sms', limit('smstest', 20, 3_600_000), express.json({ limit: '8kb' }), async (req, res) => {
+  if (!canManageSettings(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
+  const to = formatMobile(String(req.body?.to || ''), smsSettings.numberFormat);
+  if (!to) return res.status(400).json({ error: 'شماره موبایل معتبر نیست.' });
+  const result = await sendSms(smsSettings, [to], String(req.body?.message || 'پیام آزمایشی سامانه دعوتنامه').slice(0, 500));
+  if (result.ok) countSms(1);
+  res.json(result);
+});
+
+// ----- SMS notifications for attendance confirmations
+
+const notifyFile = (id: string) => path.join(NOTIFY_DIR, `${id}.json`);
+async function readNotifyLog(id: string): Promise<NotifyLogEntry[]> {
+  try {
+    return JSON.parse(await fs.readFile(notifyFile(id), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+let notifyLock: Promise<unknown> = Promise.resolve();
+function upsertNotifyLog(id: string, entry: NotifyLogEntry) {
+  const run = notifyLock.then(async () => {
+    if (!(await fs.stat(fileFor(id)).catch(() => null))) return; // invitation deleted meanwhile
+    const list = (await readNotifyLog(id)).filter(e => e.id !== entry.id);
+    list.unshift(entry);
+    await fs.writeFile(notifyFile(id), JSON.stringify(list.slice(0, 200), null, 2));
+  });
+  notifyLock = run.catch(() => {});
+  return run;
+}
+
+// Daily cap across all invitations (protects the panel's credit) + per-invitation hourly cap.
+const smsDay = { day: '', count: 0 };
+function smsCountToday() {
+  const d = tehranDay();
+  if (smsDay.day !== d) Object.assign(smsDay, { day: d, count: 0 });
+  return smsDay.count;
+}
+const countSms = (n: number) => {
+  smsCountToday();
+  smsDay.count += n;
+};
+const PER_INVITATION_HOURLY = 60;
+const RETRY_DELAYS = [10_000, 60_000, 300_000];
+
+async function deliver(recordId: string, entry: NotifyLogEntry) {
+  if (smsCountToday() + entry.to.length > smsSettings.dailyLimit) {
+    return upsertNotifyLog(recordId, { ...entry, status: 'skipped', detail: 'سقف روزانه ارسال پیامک (تنظیمات سامانه) پر شده است.' });
+  }
+  const result = await sendSms(smsSettings, entry.to, entry.message);
+  const attempts = entry.attempts + 1;
+  if (result.ok) {
+    countSms(entry.to.length);
+    return upsertNotifyLog(recordId, { ...entry, attempts, status: 'sent', detail: result.detail || 'ارسال شد' });
+  }
+  if (attempts <= RETRY_DELAYS.length) {
+    await upsertNotifyLog(recordId, { ...entry, attempts, status: 'pending', detail: `تلاش ${attempts} ناموفق: ${result.detail}` });
+    setTimeout(() => deliver(recordId, { ...entry, attempts }).catch(console.error), RETRY_DELAYS[attempts - 1]).unref();
+    return;
+  }
+  return upsertNotifyLog(recordId, { ...entry, attempts, status: 'failed', detail: result.detail || `HTTP ${result.status}` });
+}
+
+async function notifyRsvp(rec: InvitationRecord, config: InvitationConfig, entry: Rsvp, rep?: Tracking['reps'][number], link?: Tracking['links'][number]) {
+  const n = rec.notify;
+  if (!n.enabled) return;
+  const fmt = smsSettings.numberFormat;
+  const to = new Set<string>();
+  if (n.toRep && rep) {
+    const m = formatMobile(rep.phone, fmt) || formatMobile(rep.whatsapp, fmt);
+    if (m) to.add(m);
+  }
+  for (const m of parseNumbers(n.extraNumbers, fmt)) to.add(m);
+  const day = entry.day ? new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${entry.day}T12:00:00Z`)) : 'مشخص نشده';
+  const message = renderTemplate(n.template, {
+    guest: entry.name,
+    org: entry.org ? ` — ${entry.org}` : '',
+    phone: entry.phone || '—',
+    day,
+    count: entry.count.toLocaleString('fa-IR'),
+    event: config.event.title,
+    company: config.company.name,
+    rep: rep?.name || 'شرکت',
+    source: link ? `${link.label || link.code} (${channelLabel(link.channel)})${entry.referral ? ' · ارجاع' : ''}` : 'لینک اصلی',
+  });
+  const log: NotifyLogEntry = { id: entry.id, at: new Date().toISOString(), to: [...to], message, status: 'pending', attempts: 0, detail: '' };
+  if (smsSettings.provider === 'none') return upsertNotifyLog(rec.id, { ...log, status: 'skipped', detail: 'پنل پیامک در تنظیمات سامانه تنظیم نشده است.' });
+  if (!to.size) return upsertNotifyLog(rec.id, { ...log, status: 'skipped', detail: rep ? 'کارشناس شماره موبایل معتبر ندارد و شماره دیگری هم تعیین نشده است.' : 'گیرنده‌ای تعیین نشده است.' });
+  if (hit(`sms:${rec.id}`, 3_600_000) > PER_INVITATION_HOURLY) return upsertNotifyLog(rec.id, { ...log, status: 'skipped', detail: 'سقف ساعتی اعلان این دعوتنامه پر شده است.' });
+  await upsertNotifyLog(rec.id, log);
+  await deliver(rec.id, log);
+}
+
+api.get('/records/:id/notify', async (req, res) => {
+  const rec = await editable(req, res);
+  if (!rec) return;
+  res.set('Cache-Control', 'no-store').json({ notify: rec.notify, smsReady: smsSettings.provider !== 'none', numberFormat: smsSettings.numberFormat, log: await readNotifyLog(rec.id) });
+});
+
+api.put('/records/:id/notify', express.json({ limit: '16kb' }), async (req, res) => {
+  const out = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return { status: 404, body: { error: 'دعوتنامه پیدا نشد' } };
+    if (!canEdit(req, rec)) return { status: 401, body: { error: 'اجازه ویرایش این دعوتنامه را ندارید' } };
+    const notify = sanitizeNotify(req.body?.notify);
+    await writeRecord({ ...rec, notify, updatedAt: new Date().toISOString() });
+    return { status: 200, body: { notify } };
+  });
+  res.status(out.status).json(out.body);
+});
+
+/** Send a sample notification with the current template to the configured recipients. */
+api.post('/records/:id/notify/test', limit('smstest', 20, 3_600_000), async (req, res) => {
+  const rec = await editable(req, res);
+  if (!rec) return;
+  const config = rec.published ?? rec.draft;
+  const rep = rec.tracking.reps[0];
+  const sample: Rsvp = { id: `test-${crypto.randomBytes(3).toString('hex')}`, at: new Date().toISOString(), name: 'مهمان آزمایشی', phone: '09120000000', org: 'شرکت نمونه', day: config.event.startDate, count: 2, guest: '', lang: 'fa' };
+  await notifyRsvp({ ...rec, notify: { ...rec.notify, enabled: true } }, config, sample, rec.notify.toRep ? rep : undefined, rec.tracking.links.find(l => l.repId === rep?.id));
+  res.json({ log: await readNotifyLog(rec.id) });
 });
 
 // ----- links & sales reps (live settings, effective immediately)
@@ -1006,6 +1182,7 @@ async function renderPage(html: string, req: Request): Promise<{ status: number;
   const rel = relPath(req);
   if (!rel || rel === 'builder' || rel.startsWith('builder/')) return { status: 200, html };
   if (rel.startsWith('preview/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
+  if (rel === 'settings') return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
   if (rel.startsWith('rep/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
   const parts = rel.split('/');
   // <slug>/<link code>: tracked link of a published invitation
@@ -1042,6 +1219,7 @@ async function renderPage(html: string, req: Request): Promise<{ status: number;
 
 async function start() {
   await buildSlugIndex();
+  await loadSettings();
   await collectGarbage();
   setInterval(() => collectGarbage().catch(console.error), 6 * 3_600_000).unref();
 

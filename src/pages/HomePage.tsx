@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Pencil, Plus, Trash2, Sparkles, Lock, KeyRound, LogOut, CopyPlus, Search, Eye, Users, MessageSquare, CircleCheck } from 'lucide-react';
+import { ExternalLink, Pencil, Plus, Trash2, Sparkles, Lock, KeyRound, LogOut, CopyPlus, Settings, Search, Eye, Users, MessageSquare, CircleCheck } from 'lucide-react';
 import { DuplicateModal } from '../builder/panels';
 import type { CopyMode } from '../shared/invitation';
 import { api, editUrl, forgetMyInvitation, getAdminPassword, getMyInvitations, saveMyInvitation, setAdminPassword, setEditAuth, type MyInvitation, type RecordStatus, type RecordSummary } from '../lib/api';
@@ -202,16 +202,21 @@ export default function HomePage() {
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-black text-lg">همه دعوتنامه‌ها (مدیر)</h2>
-              <button
-                onClick={() => {
-                  setAdminPassword('');
-                  setIsAdmin(false);
-                  setAll([]);
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white"
-              >
-                <LogOut className="w-4 h-4" /> خروج مدیر
-              </button>
+              <span className="flex items-center gap-3">
+                <a href={route('settings')} className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white">
+                  <Settings className="w-4 h-4" /> تنظیمات سامانه
+                </a>
+                <button
+                  onClick={() => {
+                    setAdminPassword('');
+                    setIsAdmin(false);
+                    setAll([]);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white"
+                >
+                  <LogOut className="w-4 h-4" /> خروج مدیر
+                </button>
+              </span>
             </div>
             {issued && (
               <div className="mb-3 rounded-2xl bg-amber-400/10 border border-amber-400/30 p-4 text-sm space-y-2">

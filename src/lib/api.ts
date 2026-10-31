@@ -2,6 +2,7 @@ import type { CopyMode, InvitationConfig, Issue, IssueField, Lang } from '../sha
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, VIDEO_WARN_MB, type UploadKind } from '../shared/uploads';
 import { apiUrl } from './paths';
 import type { PublicLinkInfo, PublicTracking, Tracking, TrackedLink } from '../shared/tracking';
+import type { NotifyLogEntry, NotifySettings, SmsSettings } from '../shared/notify';
 
 export { inviteUrl, editUrl } from './paths';
 export type { UploadKind };
@@ -59,6 +60,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export interface ServerMeta {
   adminRequired: boolean;
   videoProcessing: boolean;
+  smsReady?: boolean;
 }
 
 export type RecordStatus = 'draft' | 'published' | 'changed';
@@ -175,6 +177,12 @@ export const api = {
   stats: (id: string) => request<Stats>('GET', `records/${encodeURIComponent(id)}/stats`),
   tracking: (id: string) => request<Tracking>('GET', `records/${encodeURIComponent(id)}/tracking`),
   saveTracking: (id: string, tracking: Tracking) => request<Tracking>('PUT', `records/${encodeURIComponent(id)}/tracking`, { tracking }),
+  settings: () => request<{ sms: SmsSettings; sentToday: number }>('GET', 'settings'),
+  saveSettings: (sms: SmsSettings) => request<{ sms: SmsSettings; sentToday: number }>('PUT', 'settings', { sms }),
+  testSms: (to: string, message: string) => request<{ ok: boolean; status: number; detail: string }>('POST', 'settings/test-sms', { to, message }),
+  notify: (id: string) => request<{ notify: NotifySettings; smsReady: boolean; numberFormat: 'local' | 'intl'; log: NotifyLogEntry[] }>('GET', `records/${encodeURIComponent(id)}/notify`),
+  saveNotify: (id: string, notify: NotifySettings) => request<{ notify: NotifySettings }>('PUT', `records/${encodeURIComponent(id)}/notify`, { notify }),
+  testNotify: (id: string) => request<{ log: NotifyLogEntry[] }>('POST', `records/${encodeURIComponent(id)}/notify/test`),
   repReport: (id: string, repId: string, token: string) => request<RepReport>('GET', `rep-report/${encodeURIComponent(id)}?rep=${encodeURIComponent(repId)}&k=${encodeURIComponent(token)}`),
   unpublish: (id: string) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/unpublish`),
   remove: (id: string) => request<{ ok: boolean }>('DELETE', `records/${encodeURIComponent(id)}`),

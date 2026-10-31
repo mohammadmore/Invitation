@@ -32,6 +32,7 @@ import { ensureContrast } from '../shared/color';
 import { BasicsStep, BrandStep, EnglishStep, EventStep, GuestsStep, MediaStep, TextsStep, type SlugState, type Update } from '../builder/steps';
 import { ConflictModal, DuplicateModal, FeedbackSection, HistoryModal, PersonalLinks, RsvpList } from '../builder/panels';
 import LinksStep from '../builder/links';
+import NotifySection from '../builder/notify';
 import Dashboard from '../builder/dashboard';
 import type { PublicLinkInfo, Tracking } from '../shared/tracking';
 import type { Stats } from '../lib/api';
@@ -489,6 +490,13 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
             <>
               <GuestsStep {...stepProps} />
               <PersonalLinks baseUrl={config.slug ? inviteUrl(record?.publishedSlug || config.slug) : ''} published={!!record?.publishedSlug} />
+              {record && (
+                <NotifySection
+                  recordId={record.id}
+                  rsvpEnabled={config.rsvp.enabled}
+                  trackingHint="در حالت «چند لینک» (مرحله بعد)، اعلام حضور به کارشناسی که لینکش اعتبار را گرفته، روی شماره موبایل یا واتس‌اپ او پیامک می‌شود."
+                />
+              )}
               {record && config.rsvp.enabled && <RsvpList id={record.id} slug={config.slug} />}
             </>
           )}

@@ -10,11 +10,13 @@ const HomePage = lazy(() => import('./pages/HomePage'));
 const BuilderPage = lazy(() => import('./pages/BuilderPage'));
 const PreviewPage = lazy(() => import('./pages/PreviewPage'));
 const RepReportPage = lazy(() => import('./pages/RepReportPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 function Router() {
   const path = appPath();
   let m: RegExpMatchArray | null;
   if (path === 'builder') return <BuilderPage />;
+  if (path === 'settings') return <SettingsPage />;
   if ((m = path.match(/^builder\/([^/]+)$/))) return <BuilderPage recordId={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^preview\/([^/]+)$/))) return <PreviewPage id={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^rep\/([^/]+)$/))) return <RepReportPage id={decodeURIComponent(m[1]).toLowerCase()} />;
