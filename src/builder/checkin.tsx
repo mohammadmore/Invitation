@@ -107,7 +107,7 @@ export default function CheckinSection({ recordId, rsvpEnabled }: { recordId: st
 
           <Toggle checked={c.smsTicket} onChange={smsTicket => set({ smsTicket })} label="ارسال لینک بلیت با پیامک به مهمان (اگر شماره موبایل داده باشد)" />
           {c.smsTicket && (
-            <Field label="متن پیامک بلیت" hint="{guest} نام مهمان، {company}، {event}، {link} لینک بلیت، {code} کد بلیت" action={c.smsTicketTemplate !== DEFAULT_TICKET_TEMPLATE && <button type="button" onClick={() => set({ smsTicketTemplate: DEFAULT_TICKET_TEMPLATE })} className="text-[11px] font-bold text-sky-600">متن پیش‌فرض</button>}>
+            <Field label="متن پیامک بلیت" hint="{guest} نام مهمان، {company}، {event}، {link} لینک بلیت، {code} کد بلیت" action={c.smsTicketTemplate !== DEFAULT_TICKET_TEMPLATE && <button type="button" onClick={() => set({ smsTicketTemplate: DEFAULT_TICKET_TEMPLATE })} className="text-[11px] font-bold text-(color:--ad-ink)">متن پیش‌فرض</button>}>
               <TextArea rows={3} maxLength={400} value={c.smsTicketTemplate} onChange={e => set({ smsTicketTemplate: e.target.value })} />
             </Field>
           )}
@@ -119,7 +119,7 @@ export default function CheckinSection({ recordId, rsvpEnabled }: { recordId: st
               <Toggle checked={c.notifyExtra} onChange={notifyExtra => set({ notifyExtra })} label="به شماره‌های ثابت اعلان" />
             </div>
             {(c.notifyRep || c.notifyExtra) && (
-              <Field label="متن پیامک ورود" hint="{guest}، {org}، {count}، {time} ساعت ورود، {phone}، {rep}، {company}، {event}" action={c.arrivalTemplate !== DEFAULT_ARRIVAL_TEMPLATE && <button type="button" onClick={() => set({ arrivalTemplate: DEFAULT_ARRIVAL_TEMPLATE })} className="text-[11px] font-bold text-sky-600">متن پیش‌فرض</button>}>
+              <Field label="متن پیامک ورود" hint="{guest}، {org}، {count}، {time} ساعت ورود، {phone}، {rep}، {company}، {event}" action={c.arrivalTemplate !== DEFAULT_ARRIVAL_TEMPLATE && <button type="button" onClick={() => set({ arrivalTemplate: DEFAULT_ARRIVAL_TEMPLATE })} className="text-[11px] font-bold text-(color:--ad-ink)">متن پیش‌فرض</button>}>
                 <TextArea rows={3} maxLength={400} value={c.arrivalTemplate} onChange={e => set({ arrivalTemplate: e.target.value })} />
               </Field>
             )}

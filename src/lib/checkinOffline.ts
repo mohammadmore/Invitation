@@ -27,7 +27,7 @@ export interface Problem {
 }
 
 interface Snapshot {
-  info: { company: string; event: string; timezone: string };
+  info: { company: string; event: string; timezone: string; theme?: { primary: string; accent: string } };
   guests: CheckinGuest[];
   savedAt: string;
 }

@@ -146,7 +146,7 @@ export function BasicsStep({ config, update, slugLocked, recordId, issues, previ
           <div className="flex gap-2">
             <div
               dir="ltr"
-              className={`flex-1 min-w-0 flex items-stretch rounded-xl border overflow-hidden focus-within:ring-4 focus-within:ring-sky-500/15 ${showInvalid || slugState === 'taken' || slugIssue ? 'border-rose-400' : 'border-slate-300 focus-within:border-sky-500'}`}
+              className={`flex-1 min-w-0 flex items-stretch rounded-xl border overflow-hidden focus-within:ring-4 focus-within:ring-(color:--ad-ink)/15 ${showInvalid || slugState === 'taken' || slugIssue ? 'border-rose-400' : 'border-slate-300 focus-within:border-(color:--ad-ink)'}`}
             >
               <span className="flex items-center gap-1 bg-slate-100 text-slate-500 px-3 text-xs sm:text-sm whitespace-nowrap max-w-[55%] overflow-hidden">
                 <Link2 className="w-4 h-4 shrink-0" />
@@ -211,7 +211,7 @@ function ContactSection({ config, update, issues, previewAt }: Pick<StepProps, '
             <span className="flex items-center justify-between text-xs font-bold text-slate-500 mb-1">
               واتس‌اپ
               {c.phone && !c.whatsapp && (
-                <button type="button" onClick={() => set({ whatsapp: c.phone })} className="text-[11px] text-sky-600">
+                <button type="button" onClick={() => set({ whatsapp: c.phone })} className="text-[11px] text-(color:--ad-ink)">
                   همان تلفن
                 </button>
               )}
@@ -572,7 +572,7 @@ export function EventStep({ config, update, issues, previewAt }: StepProps) {
 
         {(!dateHidden || !timeHidden) && (
           <Field label="منطقه زمانی محل برگزاری" hint="برای ثبت درست ساعت در تقویم مهمانانی که در کشور دیگری هستند.">
-            <select value={e.timezone} onChange={ev => setSchedule({ timezone: ev.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-slate-900 outline-none focus:border-sky-500">
+            <select value={e.timezone} onChange={ev => setSchedule({ timezone: ev.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-slate-900 outline-none focus:border-(color:--ad-ink)">
               {TIMEZONES.map(z => (
                 <option key={z.id} value={z.id}>
                   {z.label}
@@ -619,7 +619,7 @@ export function EventStep({ config, update, issues, previewAt }: StepProps) {
               setAutoLabels(true);
               update('event', { dateLabel: jalaliRangeLabel(e.startDate, e.endDate), timeLabel: timeRangeLabel(e.startTime, e.endTime, e.timezone) });
             }}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-600 hover:underline"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-(color:--ad-ink) hover:underline"
           >
             <RefreshCw className="w-3.5 h-3.5" /> ساخت خودکار متن‌ها از روی تاریخ و ساعت
           </button>

@@ -31,14 +31,14 @@ export default function SettingsPage() {
   useEffect(() => {
     hideSplash();
     document.title = 'تنظیمات سامانه';
-    document.body.style.backgroundColor = '#f1f5f9';
+    document.body.style.backgroundColor = '#f6f1fe';
     load();
   }, []);
 
   if (state === 'loading') {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-100">
-        <Loader2 className="w-8 h-8 animate-spin text-sky-500" />
+      <div className="min-h-[100dvh] flex items-center justify-center admin-bg">
+        <Loader2 className="w-8 h-8 animate-spin text-(color:--ad-ink)" />
       </div>
     );
   }
@@ -78,13 +78,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-100 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
+    <div className="min-h-[100dvh] admin-bg text-slate-900">
+      <header className="glass !border-x-0 !border-t-0 sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-3">
-          <a href={route()} className="p-2 -mr-2 rounded-xl hover:bg-slate-100 text-slate-600" title="صفحه اصلی">
+          <a href={route()} className="p-2 -mr-2 rounded-xl hover:bg-white/60 text-slate-600" title="صفحه اصلی">
             <Home className="w-5 h-5" />
           </a>
-          <h1 className="font-black">تنظیمات سامانه</h1>
+          <h1 className="font-black text-gradient-ad">تنظیمات سامانه</h1>
         </div>
       </header>
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
@@ -125,7 +125,7 @@ export default function SettingsPage() {
           )}
 
           {sms.provider === 'custom' && (
-            <div className="rounded-2xl bg-slate-50 p-4 space-y-3">
+            <div className="rounded-2xl bg-white/60 border border-white p-4 space-y-3">
               <p className="text-xs text-slate-600 leading-relaxed">
                 مستندات وب‌سرویس پنل خود را ببینید و درخواست ارسال را این‌جا شرح دهید. در آدرس و بدنه می‌توانید از <code dir="ltr">{'{to}'}</code>، <code dir="ltr">{'{message}'}</code> و <code dir="ltr">{'{sender}'}</code> استفاده کنید.
               </p>
@@ -178,7 +178,7 @@ export default function SettingsPage() {
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <button onClick={save} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-black px-5 py-2.5 disabled:opacity-60">
+            <button onClick={save} disabled={saving} className="inline-flex items-center gap-2 rounded-xl btn-ad hover:brightness-110 text-white font-black px-5 py-2.5 disabled:opacity-60">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} ذخیره
             </button>
             {msg && <span className={`text-sm font-bold ${msg.ok ? 'text-emerald-600' : 'text-rose-600'}`}>{msg.text}</span>}
@@ -225,15 +225,15 @@ function Login({ onDone }: { onDone: () => void }) {
     setError('رمز نادرست است');
   }
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-slate-100 p-6">
-      <form onSubmit={submit} className="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 w-full max-w-sm text-center space-y-4">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center">
+    <div className="min-h-[100dvh] flex items-center justify-center admin-bg p-6">
+      <form onSubmit={submit} className="glass rounded-3xl p-8 w-full max-w-sm text-center space-y-4">
+        <div className="mx-auto w-12 h-12 rounded-2xl bg-(color:--ad-ink)/15 text-(color:--ad-ink) flex items-center justify-center">
           <Lock className="w-6 h-6" />
         </div>
         <h1 className="font-black text-lg">تنظیمات سامانه — ورود مدیر</h1>
-        <input type="password" autoFocus value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 outline-none focus:border-sky-500" />
+        <input type="password" autoFocus value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 outline-none focus:border-(color:--ad-ink)" />
         {error && <p className="text-sm text-rose-600">{error}</p>}
-        <button className="w-full rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-black py-3">ورود</button>
+        <button className="w-full rounded-xl btn-ad hover:brightness-110 text-white font-black py-3">ورود</button>
       </form>
     </div>
   );

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, CameraOff, CircleCheck, CloudOff, Keyboard, Loader2, RefreshCw, RotateCcw, Search, ScanLine, TriangleAlert, UserPlus, Users, Wifi, XCircle } from 'lucide-react';
 import { apiUrl, BASE } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
+import { useAdminTheme } from '../lib/adminTheme';
 import { offlineStore, newOpId, type CheckinOp, type Problem } from '../lib/checkinOffline';
 import { ticketFromScan, type CheckinGuest, type ScanStatus } from '../shared/checkin';
 import { channelLabel } from '../shared/tracking';
@@ -25,6 +26,7 @@ interface Info {
   company: string;
   event: string;
   timezone: string;
+  theme?: { primary: string; accent: string };
 }
 
 class Offline extends Error {}
@@ -119,6 +121,8 @@ export default function CheckinPage({ id }: { id: string }) {
   const store = useMemo(() => offlineStore(id), [id]);
   const cached = useMemo(() => store.loadData(), [store]);
   const [info, setInfo] = useState<Info | null>(cached?.info ?? null);
+  // Dark glass in the invitation's own palette (cached, so it works offline too)
+  const palette = useAdminTheme(info?.theme, 'dark');
   // Read inside the sync callbacks through a ref, so they stay stable (no effect re-run loops).
   const infoRef = useRef<Info | null>(info);
   infoRef.current = info;
@@ -149,8 +153,8 @@ export default function CheckinPage({ id }: { id: string }) {
   const refresh = useCallback(async () => {
     try {
       const r = await fetchList(id, token);
-      const i = { company: r.company, event: r.event, timezone: r.timezone };
-      setInfo(prev => (prev && prev.company === i.company && prev.event === i.event && prev.timezone === i.timezone ? prev : i));
+      const i: Info = { company: r.company, event: r.event, timezone: r.timezone, theme: r.theme };
+      setInfo(prev => (prev && JSON.stringify(prev) === JSON.stringify(i) ? prev : i));
       setServerGuests(r.guests);
       const at = new Date().toISOString();
       setLastSync(at);
@@ -215,7 +219,6 @@ export default function CheckinPage({ id }: { id: string }) {
 
   useEffect(() => {
     document.title = 'ثبت حضور در غرفه';
-    document.body.style.backgroundColor = '#0f172a';
     refresh().then(() => flush());
     const tick = window.setInterval(() => {
       flush().then(() => refresh());
@@ -303,7 +306,7 @@ export default function CheckinPage({ id }: { id: string }) {
 
   if (fatal) {
     return (
-      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 bg-slate-900 text-white p-6 text-center">
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 admin-bg-dark text-white p-6 text-center" style={palette}>
         <p className="text-2xl font-black">{fatal === 'revoked' ? 'صفحه ثبت حضور در دسترس نیست' : 'اتصال برقرار نشد'}</p>
         <p className="text-slate-400 text-sm leading-relaxed">
           {fatal === 'revoked'
@@ -320,14 +323,14 @@ export default function CheckinPage({ id }: { id: string }) {
   }
   if (!info) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-900">
-        <Loader2 className="w-8 h-8 animate-spin text-sky-400" />
+      <div className="min-h-[100dvh] flex items-center justify-center admin-bg-dark" style={palette}>
+        <Loader2 className="w-8 h-8 animate-spin text-(color:--ad-ink)" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-900 text-white pb-24">
+    <div className="min-h-[100dvh] admin-bg-dark text-white pb-24" style={palette}>
       <header className="px-4 pt-4 pb-3 space-y-3 max-w-xl mx-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -336,7 +339,7 @@ export default function CheckinPage({ id }: { id: string }) {
               {info.company} — {info.event}
             </p>
           </div>
-          <input value={staff} onChange={e => setStaff(e.target.value)} placeholder="نام شما (متصدی)" className="w-36 rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs outline-none focus:border-sky-400" />
+          <input value={staff} onChange={e => setStaff(e.target.value)} placeholder="نام شما (متصدی)" className="w-36 rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs outline-none focus:border-(color:--ad-ink)" />
         </div>
         <SyncBar online={online} queued={queue.length} syncing={syncing} lastSync={lastSync} offlineReady={offlineReady} onSync={() => flush().then(() => refresh())} />
         {problems.length > 0 && (
@@ -371,7 +374,7 @@ export default function CheckinPage({ id }: { id: string }) {
 
       {result && <ResultCard result={result} onClose={() => setResult(null)} onUndo={g => submit({ type: 'undo', rsvpId: g.id })} />}
 
-      <nav className="fixed bottom-0 inset-x-0 bg-slate-950/95 backdrop-blur border-t border-white/10 pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 inset-x-0 glass-dark !border-x-0 !border-b-0 pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto grid grid-cols-4">
           {(
             [
@@ -381,7 +384,7 @@ export default function CheckinPage({ id }: { id: string }) {
               ['present', Users, `حاضرین (${fa(present.length)})`],
             ] as [Tab, typeof ScanLine, string][]
           ).map(([t, Icon, label]) => (
-            <button key={t} onClick={() => setTab(t)} className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-bold ${tab === t ? 'text-sky-400' : 'text-slate-400'}`}>
+            <button key={t} onClick={() => setTab(t)} className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-bold ${tab === t ? 'text-(color:--ad-ink)' : 'text-slate-400'}`}>
               <Icon className="w-5 h-5" />
               {label}
             </button>
@@ -415,7 +418,7 @@ function SyncBar({ online, queued, syncing, lastSync, offlineReady, onSync }: { 
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-white/5 py-2">
+    <div className="rounded-2xl glass-dark py-2">
       <p className="text-xl font-black tabular-nums">{value}</p>
       <p className="text-[10px] text-slate-400 font-bold">{label}</p>
     </div>
@@ -545,7 +548,7 @@ function Scanner({ onCode, paused }: { onCode: (code: string) => void; paused: b
     <div className="space-y-3">
       <div className="relative aspect-square rounded-3xl overflow-hidden bg-black border border-white/10">
         <video ref={videoRef} playsInline muted className={`w-full h-full object-cover ${on ? '' : 'hidden'}`} />
-        {on && <div className="absolute inset-[18%] border-4 border-sky-400/80 rounded-3xl pointer-events-none" />}
+        {on && <div className="absolute inset-[18%] border-4 border-(color:--ad-ink)/80 rounded-3xl pointer-events-none" />}
         {!on && (
           <button onClick={() => (setCamError(''), setOn(true))} className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-300">
             <Camera className="w-14 h-14" />
@@ -577,10 +580,10 @@ function Scanner({ onCode, paused }: { onCode: (code: string) => void; paused: b
             value={manual}
             onChange={e => setManual(e.target.value.toUpperCase())}
             placeholder="کد ۸ حرفی بلیت"
-            className="w-full rounded-xl bg-white/10 border border-white/10 pr-9 pl-3 py-3 font-mono tracking-widest placeholder:tracking-normal placeholder:font-sans outline-none focus:border-sky-400"
+            className="w-full rounded-xl bg-white/10 border border-white/10 pr-9 pl-3 py-3 font-mono tracking-widest placeholder:tracking-normal placeholder:font-sans outline-none focus:border-(color:--ad-ink)"
           />
         </div>
-        <button className="rounded-xl bg-sky-500 text-slate-950 font-black px-4">ثبت</button>
+        <button className="rounded-xl btn-ad text-white font-black px-4">ثبت</button>
       </form>
     </div>
   );
@@ -595,10 +598,10 @@ function SearchList({ guests, onCheckIn }: { guests: CheckinGuest[]; onCheckIn: 
   }, [q, guests]);
   return (
     <div className="space-y-3">
-      <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="نام، شرکت، تلفن یا کد بلیت…" className="w-full rounded-xl bg-white/10 border border-white/10 px-3.5 py-3 outline-none focus:border-sky-400" />
+      <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="نام، شرکت، تلفن یا کد بلیت…" className="w-full rounded-xl bg-white/10 border border-white/10 px-3.5 py-3 outline-none focus:border-(color:--ad-ink)" />
       <ul className="space-y-2">
         {list.map(g => (
-          <li key={g.id} className="flex items-center gap-3 rounded-2xl bg-white/5 p-3">
+          <li key={g.id} className="flex items-center gap-3 rounded-2xl glass-dark p-3">
             <div className="flex-1 min-w-0">
               <GuestLine g={g} />
             </div>
@@ -623,7 +626,7 @@ function WalkIn({ onSubmit }: { onSubmit: (d: { name: string; phone: string; org
   const [org, setOrg] = useState('');
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
-  const input = 'w-full rounded-xl bg-white/10 border border-white/10 px-3.5 py-3 outline-none focus:border-sky-400';
+  const input = 'w-full rounded-xl bg-white/10 border border-white/10 px-3.5 py-3 outline-none focus:border-(color:--ad-ink)';
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -648,7 +651,7 @@ function WalkIn({ onSubmit }: { onSubmit: (d: { name: string; phone: string; org
         تعداد نفرات
         <input type="number" min={1} max={20} value={count} onChange={e => setCount(Math.max(1, Number(e.target.value) || 1))} className="w-20 rounded-xl bg-white/10 border border-white/10 px-3 py-2" />
       </label>
-      <button disabled={busy || !name.trim()} className="w-full rounded-2xl bg-sky-500 text-slate-950 font-black py-3.5 disabled:opacity-50">
+      <button disabled={busy || !name.trim()} className="w-full rounded-2xl btn-ad text-white font-black py-3.5 disabled:opacity-50">
         ثبت و ورود
       </button>
     </form>
@@ -660,7 +663,7 @@ function PresentList({ guests, onUndo }: { guests: CheckinGuest[]; onUndo: (g: C
   return (
     <ul className="space-y-2">
       {sorted.map(g => (
-        <li key={g.id} className="flex items-center gap-3 rounded-2xl bg-white/5 p-3">
+        <li key={g.id} className="flex items-center gap-3 rounded-2xl glass-dark p-3">
           <span className="text-xs font-bold text-emerald-400 w-12 shrink-0 tabular-nums">{timeOf(g.checkedInAt)}</span>
           <div className="flex-1 min-w-0">
             <GuestLine g={g} />

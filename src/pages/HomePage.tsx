@@ -6,6 +6,11 @@ import type { CopyMode } from '../shared/invitation';
 import { api, editUrl, forgetMyInvitation, getAdminPassword, getMyInvitations, saveMyInvitation, setAdminPassword, setEditAuth, type MyInvitation, type RecordStatus, type RecordSummary } from '../lib/api';
 import { route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
+import { useAdminTheme } from '../lib/adminTheme';
+import { adminPalette } from '../shared/color';
+
+/** White modals on the dark home page use the light studio palette. */
+const LIGHT_VARS = adminPalette(null) as React.CSSProperties;
 
 type Filter = 'all' | 'draft' | 'published' | 'changed' | 'ended' | 'feedback';
 const FILTERS: [Filter, string][] = [
@@ -37,6 +42,7 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [issued, setIssued] = useState<{ name: string; url: string } | null>(null);
+  const palette = useAdminTheme(null, 'dark');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [copyFrom, setCopyFrom] = useState<{ id: string; token?: string } | null>(null);
@@ -44,7 +50,6 @@ export default function HomePage() {
   useEffect(() => {
     hideSplash();
     document.title = 'سازنده دعوتنامه نمایشگاه';
-    document.body.style.backgroundColor = '#020617';
     api.meta().then(m => setAdminRequired(m.adminRequired)).catch(() => {});
     if (getAdminPassword()) loadAdmin();
     // Current status of this browser's invitations
@@ -147,19 +152,20 @@ export default function HomePage() {
   const label = (company: string, event: string) => [company || 'بدون نام', event].filter(Boolean).join(' — ');
 
   return (
-    <div className="min-h-[100dvh] bg-slate-950 text-white">
-      <div className="absolute inset-x-0 top-0 h-96 bg-gradient-to-b from-sky-900/40 to-transparent pointer-events-none" />
+    <div className="min-h-[100dvh] admin-bg-dark text-white" style={palette}>
       <div className="relative max-w-3xl mx-auto px-5 py-12">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 text-sky-300 bg-sky-400/10 border border-sky-400/20 rounded-full px-4 py-1.5 text-sm font-bold mb-5">
+          <div className="inline-flex items-center gap-2 text-(color:--ad-ink) bg-(color:--ad-ink)/10 border border-(color:--ad-ink)/20 rounded-full px-4 py-1.5 text-sm font-bold mb-5">
             <Sparkles className="w-4 h-4" />
             سازنده دعوتنامه دیجیتال نمایشگاه
           </div>
-          <h1 className="text-3xl sm:text-4xl font-black leading-tight mb-4">دعوتنامه اختصاصی شرکت خود را در چند دقیقه بسازید</h1>
+          <h1 className="text-3xl sm:text-4xl font-black leading-tight mb-4">
+            دعوتنامه اختصاصی شرکت خود را <span className="text-gradient-ad">در چند دقیقه</span> بسازید
+          </h1>
           <p className="text-slate-400 leading-relaxed max-w-xl mx-auto">
             اطلاعات را مرحله به مرحله وارد کنید؛ همه چیز خودکار ذخیره می‌شود. پیش‌نمایش را برای کارفرما بفرستید و وقتی همه چیز کامل شد، لینک نهایی را منتشر کنید.
           </p>
-          <a href={route('builder')} className="mt-8 inline-flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black px-7 py-4 rounded-2xl shadow-lg shadow-sky-500/20 transition">
+          <a href={route('builder')} className="mt-8 inline-flex items-center gap-2 btn-ad hover:brightness-110 text-white font-black px-7 py-4 rounded-2xl shadow-lg shadow-(color:--ad-ink)/20 transition">
             <Plus className="w-5 h-5" />
             ساخت دعوتنامه جدید
           </a>
@@ -170,7 +176,7 @@ export default function HomePage() {
             <h2 className="font-black text-lg mb-3">دعوتنامه‌های ساخته‌شده در این مرورگر</h2>
             <ul className="space-y-2">
               {mine.map(item => (
-                <li key={item.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
+                <li key={item.id} className="flex items-center gap-2 glass-dark rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-bold truncate">{label(item.company, item.event)}</p>
                     <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
@@ -229,11 +235,11 @@ export default function HomePage() {
               <div className="mb-3 space-y-2">
                 <div className="relative">
                   <Search className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
-                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="جست‌وجو در نام شرکت، نمایشگاه یا آدرس…" className="w-full bg-white/5 border border-white/10 rounded-xl pr-9 pl-3 py-2.5 text-sm outline-none focus:border-sky-400" />
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="جست‌وجو در نام شرکت، نمایشگاه یا آدرس…" className="w-full glass-dark rounded-xl pr-9 pl-3 py-2.5 text-sm outline-none focus:border-(color:--ad-ink)" />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {FILTERS.map(([f, label]) => (
-                    <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-xs font-bold transition ${filter === f ? 'bg-sky-500 text-slate-950' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                    <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-xs font-bold transition ${filter === f ? 'btn-ad text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
                       {label} ({countOf(f).toLocaleString('fa-IR')})
                     </button>
                   ))}
@@ -243,7 +249,7 @@ export default function HomePage() {
             {all.length > 0 && filtered.length === 0 && <p className="text-slate-400 text-sm">موردی پیدا نشد.</p>}
             <ul className="space-y-2">
               {filtered.map(item => (
-                <li key={item.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-4">
+                <li key={item.id} className="flex items-center gap-2 glass-dark rounded-2xl p-4">
                   <div className="flex-1 min-w-0">
                     <p className="font-bold truncate">{label(item.company, item.event)}</p>
                     <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
@@ -300,14 +306,14 @@ export default function HomePage() {
           adminRequired && (
             <form onSubmit={login} className="flex flex-wrap items-center justify-center gap-2 text-sm">
               <Lock className="w-4 h-4 text-slate-500" />
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-sky-400" />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-(color:--ad-ink)" />
               <button className="bg-white/10 hover:bg-white/20 rounded-xl px-4 py-2 font-bold">ورود مدیر</button>
               {error && <span className="text-red-300 w-full text-center">{error}</span>}
             </form>
           )
         )}
       </div>
-      <div className="text-slate-900">{copyFrom && <DuplicateModal onClose={() => setCopyFrom(null)} onCopy={duplicate} />}</div>
+      <div className="text-slate-900" style={LIGHT_VARS}>{copyFrom && <DuplicateModal onClose={() => setCopyFrom(null)} onCopy={duplicate} />}</div>
     </div>
   );
 }

@@ -1154,6 +1154,7 @@ api.get('/checkin/:id', limit('checkin', 600, 60_000), async (req, res) => {
     startDate: c.event.startDate,
     endDate: c.event.endDate,
     timezone: c.event.timezone,
+    theme: { primary: c.theme.primary, accent: c.theme.accent },
     guests: (await readRsvps(rec.id)).map(toGuest),
   });
 });
@@ -1369,6 +1370,7 @@ api.get('/rep-report/:id', limit('report', 120, 60_000), async (req, res) => {
     slug: rec.published?.slug ?? '',
     eventDates: { start: c.event.startDate, end: c.event.endDate },
     rep: { id: rep.id, name: rep.name, title: rep.title },
+    theme: { primary: c.theme.primary, accent: c.theme.accent },
     links,
     stats: { totals: statTotals(days), days, links: linkStats, utm: {} },
     rsvps,

@@ -3,6 +3,7 @@ import { BarChart3, Copy, Loader2 } from 'lucide-react';
 import { api, type RepReport } from '../lib/api';
 import { linkUrl } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
+import { useAdminTheme } from '../lib/adminTheme';
 import { channelLabel } from '../shared/tracking';
 import Dashboard from '../builder/dashboard';
 import { RsvpTable } from '../builder/panels';
@@ -12,12 +13,13 @@ import { Section } from '../builder/ui';
 export default function RepReportPage({ id }: { id: string }) {
   const [report, setReport] = useState<RepReport | null>(null);
   const [error, setError] = useState(false);
+  // Glass in the invitation's own palette
+  const palette = useAdminTheme(report?.theme);
   const repId = new URLSearchParams(window.location.search).get('rep') || '';
   const token = decodeURIComponent(window.location.hash.slice(1));
 
   useEffect(() => {
     document.title = 'گزارش کارشناس';
-    document.body.style.backgroundColor = '#f1f5f9';
     api
       .repReport(id, repId, token)
       .then(setReport)
@@ -27,7 +29,7 @@ export default function RepReportPage({ id }: { id: string }) {
 
   if (error) {
     return (
-      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 bg-slate-100 p-6 text-center">
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 admin-bg p-6 text-center">
         <p className="text-xl font-black text-slate-900">گزارش در دسترس نیست</p>
         <p className="text-slate-500 text-sm">لینک را بررسی کنید یا از مدیر لینک جدید بگیرید.</p>
       </div>
@@ -35,19 +37,19 @@ export default function RepReportPage({ id }: { id: string }) {
   }
   if (!report) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-100">
-        <Loader2 className="w-8 h-8 animate-spin text-sky-500" />
+      <div className="min-h-[100dvh] flex items-center justify-center admin-bg">
+        <Loader2 className="w-8 h-8 animate-spin text-(color:--ad-ink)" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-100 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
+    <div className="min-h-[100dvh] admin-bg text-slate-900" style={palette}>
+      <header className="glass !border-x-0 !border-t-0">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
-          <BarChart3 className="w-6 h-6 text-sky-500" />
+          <BarChart3 className="w-6 h-6 text-(color:--ad-ink)" />
           <div>
-            <h1 className="font-black">گزارش {report.rep.name}</h1>
+            <h1 className="font-black text-gradient-ad">گزارش {report.rep.name}</h1>
             <p className="text-xs text-slate-500">
               {report.company} — {report.event}
             </p>

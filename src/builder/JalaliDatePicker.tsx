@@ -71,7 +71,7 @@ export default function JalaliDatePicker({ value, onChange, min, placeholder = '
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`w-full flex items-center gap-2 rounded-xl border bg-white px-3.5 py-2.5 text-right outline-none transition focus:ring-4 focus:ring-sky-500/15 ${invalid ? 'border-rose-400' : 'border-slate-300 focus:border-sky-500'}`}
+        className={`w-full flex items-center gap-2 rounded-xl border bg-white px-3.5 py-2.5 text-right outline-none transition focus:ring-4 focus:ring-(color:--ad-ink)/15 ${invalid ? 'border-rose-400' : 'border-slate-300 focus:border-(color:--ad-ink)'}`}
       >
         <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
         <span className={value ? 'text-slate-900' : 'text-slate-400'}>{value ? jalaliLabel(value) : placeholder}</span>
@@ -113,7 +113,7 @@ export default function JalaliDatePicker({ value, onChange, min, placeholder = '
                     onChange(iso);
                     setOpen(false);
                   }}
-                  className={`h-9 rounded-lg text-sm font-bold transition ${selected ? 'bg-sky-500 text-white' : iso === today ? 'ring-1 ring-sky-400 text-sky-700' : 'text-slate-700 hover:bg-slate-100'} disabled:text-slate-300 disabled:hover:bg-transparent`}
+                  className={`h-9 rounded-lg text-sm font-bold transition ${selected ? 'btn-ad text-white' : iso === today ? 'ring-1 ring-(color:--ad-ink) text-(color:--ad-ink)' : 'text-slate-700 hover:bg-slate-100'} disabled:text-slate-300 disabled:hover:bg-transparent`}
                 >
                   {fa(i + 1)}
                 </button>
@@ -127,7 +127,7 @@ export default function JalaliDatePicker({ value, onChange, min, placeholder = '
                 const j = jalaliOf(today);
                 setView({ jy: j.jy, jm: j.jm });
               }}
-              className="text-xs font-bold text-sky-600 hover:underline"
+              className="text-xs font-bold text-(color:--ad-ink) hover:underline"
             >
               امروز
             </button>

@@ -8,8 +8,11 @@ const faNum = (n: number) => n.toLocaleString('fa-IR');
 
 export function Section({ title, description, children, onFocusCapture }: { title: string; description?: string; children: React.ReactNode; onFocusCapture?: () => void }) {
   return (
-    <section onFocusCapture={onFocusCapture} onPointerDownCapture={onFocusCapture} className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-sm">
-      <h3 className="font-black text-slate-900 text-base">{title}</h3>
+    <section onFocusCapture={onFocusCapture} onPointerDownCapture={onFocusCapture} className="glass rounded-3xl p-5 sm:p-6">
+      <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+        <span className="w-1.5 h-5 rounded-full btn-ad shrink-0" aria-hidden />
+        {title}
+      </h3>
       {description && <p className="text-sm text-slate-500 mt-1 leading-relaxed">{description}</p>}
       <div className="mt-4 space-y-4">{children}</div>
     </section>
@@ -94,14 +97,14 @@ export function Field({
 /** Small "insert suggested text" button for a field. */
 export function SuggestButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="text-[11px] font-bold text-sky-600 hover:bg-sky-50 rounded-lg px-2 py-1">
+    <button type="button" onClick={onClick} className="text-[11px] font-bold text-(color:--ad-ink) hover:bg-(color:--ad-ink)/10 rounded-lg px-2 py-1">
       درج متن پیشنهادی
     </button>
   );
 }
 
 const inputCls =
-  'w-full rounded-xl border bg-white px-3.5 py-2.5 text-slate-900 outline-none transition focus:ring-4 focus:ring-sky-500/15 placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-slate-500';
+  'w-full rounded-xl border bg-white px-3.5 py-2.5 text-slate-900 outline-none transition focus:ring-4 focus:ring-(color:--ad-ink)/15 placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-slate-500';
 
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement> & { ltr?: boolean; invalid?: boolean }) {
   const { ltr, invalid, className, ...rest } = props;
@@ -109,13 +112,13 @@ export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement> & {
     <input
       {...rest}
       dir={ltr ? 'ltr' : rest.dir}
-      className={`${inputCls} ${invalid ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-sky-500'} ${ltr ? 'text-left' : ''} ${className ?? ''}`}
+      className={`${inputCls} ${invalid ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-(color:--ad-ink)'} ${ltr ? 'text-left' : ''} ${className ?? ''}`}
     />
   );
 }
 
 export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={`${inputCls} border-slate-300 focus:border-sky-500 leading-relaxed resize-y ${props.className ?? ''}`} />;
+  return <textarea {...props} className={`${inputCls} border-slate-300 focus:border-(color:--ad-ink) leading-relaxed resize-y ${props.className ?? ''}`} />;
 }
 
 /** URL field: adds https:// on blur and flags values that aren't usable links. */
@@ -167,7 +170,7 @@ export function UrlInput({
 export function Slider({ value, onChange, min = 0, max = 100, suffix = '٪' }: { value: number; onChange: (v: number) => void; min?: number; max?: number; suffix?: string }) {
   return (
     <div className="flex items-center gap-3">
-      <input type="range" min={min} max={max} value={value} onChange={e => onChange(Number(e.target.value))} className="flex-1 accent-sky-500" />
+      <input type="range" min={min} max={max} value={value} onChange={e => onChange(Number(e.target.value))} className="flex-1 accent-(--ad-ink)" />
       <span className="w-12 text-sm font-bold text-slate-600 text-left tabular-nums">
         {faNum(value)}
         {suffix}
@@ -180,7 +183,7 @@ export function Slider({ value, onChange, min = 0, max = 100, suffix = '٪' }: {
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className="flex items-center gap-3 text-sm font-bold text-slate-700">
-      <span className={`relative w-11 h-6 shrink-0 rounded-full transition ${checked ? 'bg-sky-500' : 'bg-slate-300'}`}>
+      <span className={`relative w-11 h-6 shrink-0 rounded-full transition ${checked ? 'btn-ad' : 'bg-slate-300'}`}>
         <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${checked ? 'right-[22px]' : 'right-0.5'}`} />
       </span>
       {label}
@@ -193,7 +196,7 @@ export function ColorInput({ label, value, onChange }: { label: string; value: s
   React.useEffect(() => setText(value), [value]);
   return (
     <Field label={label}>
-      <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white p-1.5 focus-within:border-sky-500">
+      <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white p-1.5 focus-within:border-(color:--ad-ink)">
         <input type="color" value={value} onChange={e => onChange(e.target.value)} className="w-10 h-9 rounded-lg cursor-pointer border-0 bg-transparent p-0" />
         <input
           dir="ltr"
@@ -272,7 +275,7 @@ export function UploadButton({
         type="button"
         disabled={phase !== null}
         onClick={() => ref.current?.click()}
-        className={`inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-400 bg-white text-slate-700 font-bold hover:border-sky-500 hover:text-sky-600 hover:bg-sky-50 transition disabled:opacity-70 ${compact ? 'px-3 py-2 text-xs' : 'px-4 py-2.5 text-sm'}`}
+        className={`inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-400 bg-white text-slate-700 font-bold hover:border-(color:--ad-ink) hover:text-(color:--ad-ink) hover:bg-(color:--ad-ink)/10 transition disabled:opacity-70 ${compact ? 'px-3 py-2 text-xs' : 'px-4 py-2.5 text-sm'}`}
       >
         {phase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
         {phase ? `${PHASE_LABEL[phase]}${phase === 'uploading' ? ` ${faNum(progress)}٪` : ''}` : label}
@@ -337,9 +340,9 @@ export function ImageUpload({
 
 /** Selectable card used for presets (palettes, fonts, media). */
 export function ChoiceCard({ selected, onClick, children, className, asDiv }: { selected: boolean; onClick?: () => void; children: React.ReactNode; className?: string; asDiv?: boolean }) {
-  const cls = `relative rounded-2xl border-2 text-right transition ${selected ? 'border-sky-500 ring-4 ring-sky-500/15' : 'border-slate-200 hover:border-slate-300'} ${className ?? ''}`;
+  const cls = `relative rounded-2xl border-2 text-right transition ${selected ? 'border-(color:--ad-ink) ring-4 ring-(color:--ad-ink)/15' : 'border-slate-200 hover:border-slate-300'} ${className ?? ''}`;
   const badge = selected && (
-    <span className="absolute top-2 left-2 z-10 bg-sky-500 text-white rounded-full p-0.5">
+    <span className="absolute top-2 left-2 z-10 btn-ad text-white rounded-full p-0.5">
       <Check className="w-3.5 h-3.5" />
     </span>
   );
@@ -377,7 +380,7 @@ export function AudioPreview({ src }: { src: string }) {
           if (a.paused) a.play().catch(() => {});
           else a.pause();
         }}
-        className="inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-full bg-slate-900 text-white hover:bg-sky-600 transition"
+        className="inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-full bg-slate-900 text-white hover:brightness-110 transition"
       >
         {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
       </span>

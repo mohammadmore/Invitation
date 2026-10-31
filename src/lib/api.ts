@@ -150,6 +150,7 @@ export interface RepReport {
   slug: string;
   eventDates: { start: string; end: string };
   rep: { id: string; name: string; title: string };
+  theme?: { primary: string; accent: string };
   links: TrackedLink[];
   stats: Stats;
   rsvps: Rsvp[];
@@ -171,7 +172,7 @@ export const api = {
     request<{ ok: boolean; ticket: string }>('POST', `invitations/${encodeURIComponent(slug)}/rsvp`, body),
   ticket: (slug: string, code: string) => request<TicketInfo>('GET', `invitations/${encodeURIComponent(slug)}/ticket/${encodeURIComponent(code)}`),
   checkinList: (id: string, k: string) =>
-    request<{ company: string; event: string; startDate: string; endDate: string; timezone: string; guests: CheckinGuest[] }>('GET', `checkin/${encodeURIComponent(id)}?k=${encodeURIComponent(k)}`),
+    request<{ company: string; event: string; startDate: string; endDate: string; timezone: string; theme?: { primary: string; accent: string }; guests: CheckinGuest[] }>('GET', `checkin/${encodeURIComponent(id)}?k=${encodeURIComponent(k)}`),
   checkinScan: (id: string, k: string, body: { ticket?: string; rsvpId?: string; staff: string }) =>
     request<{ status: ScanStatus; guest: CheckinGuest | null }>('POST', `checkin/${encodeURIComponent(id)}/scan?k=${encodeURIComponent(k)}`, body),
   checkinUndo: (id: string, k: string, rsvpId: string) => request<{ guest: CheckinGuest | null }>('POST', `checkin/${encodeURIComponent(id)}/undo?k=${encodeURIComponent(k)}`, { rsvpId }),

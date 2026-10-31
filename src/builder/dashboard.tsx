@@ -165,7 +165,7 @@ export default function Dashboard({
 
   const header = (col: keyof Row | 'conv', label: string) => (
     <th className="p-2 font-bold whitespace-nowrap">
-      <button onClick={() => setSort(s => ({ col, desc: s.col === col ? !s.desc : true }))} className={`inline-flex items-center gap-1 ${sort.col === col ? 'text-sky-700' : ''}`}>
+      <button onClick={() => setSort(s => ({ col, desc: s.col === col ? !s.desc : true }))} className={`inline-flex items-center gap-1 ${sort.col === col ? 'text-(color:--ad-ink)' : ''}`}>
         {label}
         <ArrowDownUp className="w-3 h-3 opacity-50" />
       </button>
@@ -223,7 +223,7 @@ export default function Dashboard({
           <div key={label} className="flex items-center gap-2 text-xs">
             <span className="w-44 shrink-0 font-bold text-slate-600">{label}</span>
             <div className="flex-1 h-5 rounded-lg bg-slate-100 overflow-hidden">
-              <div className="h-full rounded-lg bg-sky-400" style={{ width: `${(n / Math.max(1, views)) * 100}%` }} />
+              <div className="h-full rounded-lg btn-ad" style={{ width: `${(n / Math.max(1, views)) * 100}%` }} />
             </div>
             <span className="w-24 shrink-0 tabular-nums font-bold text-slate-700">
               {fa(n)} <span className="text-slate-400 font-medium">{label === 'بازدید' ? '' : pct(n, unique)}</span>
@@ -253,7 +253,7 @@ export default function Dashboard({
                     setGroupBy(g);
                     setSelected('');
                   }}
-                  className={`rounded-full px-3 py-1 text-xs font-bold ${groupBy === g ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  className={`rounded-full px-3 py-1 text-xs font-bold ${groupBy === g ? 'btn-ad text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 >
                   {label}
                 </button>
@@ -298,7 +298,7 @@ export default function Dashboard({
                   <tr
                     key={r.key}
                     onClick={() => groupBy === 'link' && setSelected(s => (s === r.key ? '' : r.key))}
-                    className={`border-t border-slate-100 tabular-nums ${groupBy === 'link' ? 'cursor-pointer hover:bg-slate-50' : ''} ${selected === r.key ? 'bg-sky-50' : ''} ${best?.key === r.key ? 'font-bold' : ''}`}
+                    className={`border-t border-slate-100 tabular-nums ${groupBy === 'link' ? 'cursor-pointer hover:bg-slate-50' : ''} ${selected === r.key ? 'bg-(color:--ad-ink)/10' : ''} ${best?.key === r.key ? 'font-bold' : ''}`}
                   >
                     <td className="p-2 text-right">
                       <p className="font-bold text-slate-800">{r.label}</p>
@@ -366,7 +366,7 @@ export default function Dashboard({
             {trendDays.map(d => (
               <div key={d} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`${d}: ${trendOf(d)}`}>
                 <span className="text-[9px] text-slate-500 tabular-nums">{trendOf(d) ? fa(trendOf(d)) : ''}</span>
-                <div className={`w-full rounded-t ${inEvent(d) ? 'bg-emerald-400' : 'bg-sky-400'}`} style={{ height: `${(trendOf(d) / max) * 80}px` }} />
+                <div className={`w-full rounded-t ${inEvent(d) ? 'bg-emerald-400' : 'btn-ad'}`} style={{ height: `${(trendOf(d) / max) * 80}px` }} />
                 <span className="text-[9px] text-slate-400 truncate">{new Date(`${d}T12:00:00Z`).toLocaleDateString('fa-IR', { day: 'numeric', month: 'numeric' })}</span>
               </div>
             ))}

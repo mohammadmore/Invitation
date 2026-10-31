@@ -116,7 +116,7 @@ export default function NotifySection({ recordId, rsvpEnabled, trackingHint }: {
             label="متن پیامک"
             action={
               notify.template !== DEFAULT_NOTIFY_TEMPLATE && (
-                <button type="button" onClick={() => set({ template: DEFAULT_NOTIFY_TEMPLATE })} className="text-[11px] font-bold text-sky-600">
+                <button type="button" onClick={() => set({ template: DEFAULT_NOTIFY_TEMPLATE })} className="text-[11px] font-bold text-(color:--ad-ink)">
                   متن پیش‌فرض
                 </button>
               )

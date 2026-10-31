@@ -45,7 +45,7 @@ export function ConflictModal({ server, onLoadServer, onOverwrite }: { server: R
         از وقتی این صفحه را باز کرده‌اید، شخص دیگری (یا همین دعوتنامه در زبانه یا دستگاه دیگر) در {when(server.updatedAt)} تغییراتی ذخیره کرده است. برای اینکه کار هیچ‌کس بی‌صدا پاک نشود، ذخیره خودکار متوقف شد.
       </p>
       <div className="grid gap-2">
-        <button onClick={onLoadServer} className="rounded-2xl bg-sky-500 hover:bg-sky-600 text-white font-black py-3 px-4 text-sm text-right">
+        <button onClick={onLoadServer} className="rounded-2xl btn-ad hover:brightness-110 text-white font-black py-3 px-4 text-sm text-right">
           بارگذاری نسخه جدید
           <span className="block text-xs font-medium opacity-90">تغییرات ذخیره‌نشده این صفحه کنار گذاشته می‌شود (در تاریخچه قابل بازیابی است).</span>
         </button>
@@ -96,7 +96,7 @@ export function HistoryModal({ id, hasPublished, onClose, onRestored }: { id: st
         </button>
       )}
       {error && <p className="text-sm text-rose-600">{error}</p>}
-      {!items && !error && <Loader2 className="w-6 h-6 animate-spin text-sky-500 mx-auto" />}
+      {!items && !error && <Loader2 className="w-6 h-6 animate-spin text-(color:--ad-ink) mx-auto" />}
       {items?.length === 0 && <p className="text-sm text-slate-500">هنوز نسخه قبلی‌ای ثبت نشده است.</p>}
       <ul className="space-y-2">
         {items?.map(h => (
@@ -134,9 +134,9 @@ export function DuplicateModal({ onClose, onCopy }: { onClose: () => void; onCop
     }
   };
   const Option = ({ mode, icon: Icon, title, keep, clear }: { mode: CopyMode; icon: typeof Building2; title: string; keep: string; clear: string }) => (
-    <button disabled={!!busy} onClick={() => run(mode)} className="w-full text-right rounded-2xl border-2 border-slate-200 hover:border-sky-400 p-4 space-y-1.5 transition disabled:opacity-60">
+    <button disabled={!!busy} onClick={() => run(mode)} className="w-full text-right rounded-2xl border-2 border-slate-200 hover:border-(color:--ad-ink) p-4 space-y-1.5 transition disabled:opacity-60">
       <span className="flex items-center gap-2 font-black text-slate-900">
-        {busy === mode ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5 text-sky-600" />}
+        {busy === mode ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5 text-(color:--ad-ink)" />}
         {title}
       </span>
       <span className="block text-xs text-emerald-700 leading-relaxed">حفظ می‌شود: {keep}</span>
@@ -198,7 +198,7 @@ export function FeedbackSection({ id, feedback, revision, onChange }: { id: stri
               <span className="text-slate-500">{when(f.at)}</span>
               {f.revision !== revision && <span className="rounded-full bg-slate-200 text-slate-600 px-2 py-0.5 font-bold">برای نسخه قبلی</span>}
               <span className="flex-1" />
-              <button onClick={() => toggle(f)} className="font-bold text-sky-700 hover:underline">
+              <button onClick={() => toggle(f)} className="font-bold text-(color:--ad-ink) hover:underline">
                 {f.resolved ? 'بازکردن دوباره' : 'انجام شد'}
               </button>
             </div>
@@ -344,7 +344,7 @@ export function PersonalLinks({ baseUrl, published }: { baseUrl: string; publish
         onChange={e => setNames(e.target.value)}
         rows={5}
         placeholder={'هر نام در یک خط:\nجناب آقای دکتر احمدی\nسرکار خانم مهندس رضایی'}
-        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm outline-none focus:border-sky-500 leading-relaxed"
+        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm outline-none focus:border-(color:--ad-ink) leading-relaxed"
       />
       {baseUrl && links.length > 0 && (
         <>
@@ -360,7 +360,7 @@ export function PersonalLinks({ baseUrl, published }: { baseUrl: string; publish
             {links.map((l, i) => (
               <li key={i} className="flex items-center gap-2 p-2">
                 <span className="text-sm font-bold flex-1 min-w-0 truncate">{l.name}</span>
-                <button onClick={() => copy(l.url, String(i))} className="shrink-0 text-xs font-bold text-sky-700 hover:underline">
+                <button onClick={() => copy(l.url, String(i))} className="shrink-0 text-xs font-bold text-(color:--ad-ink) hover:underline">
                   {copied === String(i) ? 'کپی شد' : 'کپی لینک'}
                 </button>
               </li>

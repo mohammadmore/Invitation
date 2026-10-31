@@ -39,3 +39,70 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-gradient-btn { animation: none; }
 }
+
+/* ---------------------------------------------------------------- Admin: glassmorphism
+   Colours come from adminPalette() (src/shared/color.ts): the studio's violet/blue/pink,
+   or an invitation's own palette on its builder, dashboard and report pages. */
+/* Studio defaults (light); dark pages and per-invitation pages override these inline. */
+:root {
+  --ad-1: #7c3aed;
+  --ad-2: #2563eb;
+  --ad-3: #db2777;
+  --ad-base: #f6f1fe;
+  --ad-ink: #7c3aed;
+  --ad-btn-1: #7c3aed;
+  --ad-btn-2: #2563eb;
+  --ad-btn-3: #db2777;
+}
+
+@layer components {
+  .admin-bg,
+  .admin-bg-dark {
+    background-color: var(--ad-base, #f5f3ff);
+    background-image:
+      radial-gradient(42rem 32rem at 100% -5%, color-mix(in srgb, var(--ad-1) 42%, transparent), transparent 70%),
+      radial-gradient(36rem 30rem at -10% 35%, color-mix(in srgb, var(--ad-2) 32%, transparent), transparent 70%),
+      radial-gradient(40rem 34rem at 70% 110%, color-mix(in srgb, var(--ad-3) 34%, transparent), transparent 70%);
+    background-attachment: fixed;
+  }
+  .admin-bg-dark {
+    background-image:
+      radial-gradient(42rem 32rem at 100% -5%, color-mix(in srgb, var(--ad-1) 45%, transparent), transparent 70%),
+      radial-gradient(36rem 30rem at -10% 40%, color-mix(in srgb, var(--ad-2) 35%, transparent), transparent 70%),
+      radial-gradient(40rem 34rem at 70% 110%, color-mix(in srgb, var(--ad-3) 38%, transparent), transparent 70%);
+  }
+  .glass {
+    background-color: rgb(255 255 255 / 0.7);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid rgb(255 255 255 / 0.75);
+    box-shadow: 0 10px 34px -12px color-mix(in srgb, var(--ad-1, #7c3aed) 28%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.6);
+  }
+  .glass-dark {
+    background-color: rgb(255 255 255 / 0.06);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    box-shadow: 0 12px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  }
+  .btn-ad {
+    color: #fff;
+    background-color: var(--ad-btn-1, #7c3aed);
+    background-image: linear-gradient(120deg, var(--ad-btn-1, #7c3aed), var(--ad-btn-2, #2563eb), var(--ad-btn-3, #db2777));
+    background-size: 160% 100%;
+    background-position: 0% 50%;
+    transition: background-position 0.4s ease, filter 0.2s ease, opacity 0.2s ease;
+  }
+  .btn-ad:hover:not(:disabled) { background-position: 100% 50%; }
+  .text-gradient-ad {
+    background-image: linear-gradient(120deg, var(--ad-ink), var(--ad-3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass { background-color: rgb(255 255 255 / 0.94); }
+  .glass-dark { background-color: rgb(30 27 60 / 0.92); }
+}

@@ -114,7 +114,7 @@ export default function LinksStep({
     );
   }
   if (!tracking) {
-    return error ? <p className="text-sm text-rose-600">{error}</p> : <Loader2 className="w-6 h-6 animate-spin text-sky-500 mx-auto" />;
+    return error ? <p className="text-sm text-rose-600">{error}</p> : <Loader2 className="w-6 h-6 animate-spin text-(color:--ad-ink) mx-auto" />;
   }
 
   const s = tracking.settings;
@@ -175,7 +175,7 @@ export default function LinksStep({
 
 function Option({ checked, onChange, title, text }: { checked: boolean; onChange: (v: boolean) => void; title: string; text: string }) {
   return (
-    <div className={`rounded-2xl border p-3 space-y-1.5 transition ${checked ? 'border-sky-300 bg-sky-50/50' : 'border-slate-200'}`}>
+    <div className={`rounded-2xl border p-3 space-y-1.5 transition ${checked ? 'border-(color:--ad-ink)/40 bg-(color:--ad-ink)/5' : 'border-slate-200'}`}>
       <Toggle checked={checked} onChange={onChange} label={title} />
       <p className="text-[11px] text-slate-500 leading-relaxed">{text}</p>
     </div>
@@ -220,7 +220,7 @@ function RepsSection({ tracking, set, recordId }: { tracking: Tracking; set: (fn
             <Field label="تلفن همراه">
               <TextInput ltr inputMode="tel" value={rep.phone} maxLength={40} onChange={e => update(rep.id, { phone: e.target.value })} placeholder="0912…" />
             </Field>
-            <Field label="واتس‌اپ" action={rep.phone && !rep.whatsapp ? <button type="button" onClick={() => update(rep.id, { whatsapp: rep.phone })} className="text-[11px] font-bold text-sky-600">همان تلفن</button> : undefined}>
+            <Field label="واتس‌اپ" action={rep.phone && !rep.whatsapp ? <button type="button" onClick={() => update(rep.id, { whatsapp: rep.phone })} className="text-[11px] font-bold text-(color:--ad-ink)">همان تلفن</button> : undefined}>
               <TextInput ltr inputMode="tel" value={rep.whatsapp} maxLength={40} onChange={e => update(rep.id, { whatsapp: e.target.value })} />
             </Field>
             <Field label="ایمیل">
@@ -243,7 +243,7 @@ function RepsSection({ tracking, set, recordId }: { tracking: Tracking; set: (fn
           </div>
         </div>
       ))}
-      <button type="button" onClick={add} className="inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-400 px-4 py-2.5 text-sm font-bold text-slate-700 hover:border-sky-500 hover:text-sky-600">
+      <button type="button" onClick={add} className="inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-400 px-4 py-2.5 text-sm font-bold text-slate-700 hover:border-(color:--ad-ink) hover:text-(color:--ad-ink)">
         <UserPlus className="w-4 h-4" /> افزودن کارشناس
       </button>
     </Section>
@@ -362,7 +362,7 @@ function LinksSection({ tracking, set, liveSlug, published }: { tracking: Tracki
         {tracking.reps.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {tracking.reps.map(r => (
-              <button key={r.id} type="button" onClick={() => setBulkReps(b => toggle(b, r.id))} className={`rounded-full px-3 py-1 text-xs font-bold ${bulkReps.includes(r.id) ? 'bg-sky-500 text-white' : 'bg-white border border-slate-300 text-slate-600'}`}>
+              <button key={r.id} type="button" onClick={() => setBulkReps(b => toggle(b, r.id))} className={`rounded-full px-3 py-1 text-xs font-bold ${bulkReps.includes(r.id) ? 'btn-ad text-white' : 'bg-white border border-slate-300 text-slate-600'}`}>
                 {r.name || 'بدون نام'}
               </button>
             ))}
@@ -380,7 +380,7 @@ function LinksSection({ tracking, set, liveSlug, published }: { tracking: Tracki
         </button>
         <p className="text-[11px] text-slate-500">اگر کارشناسی انتخاب نشود، لینک‌های شرکت (بدون کارشناس) برای هر کانال ساخته می‌شود.</p>
       </div>
-      {msg && <p className="text-xs font-bold text-sky-700">{msg}</p>}
+      {msg && <p className="text-xs font-bold text-(color:--ad-ink)">{msg}</p>}
 
       {/* list */}
       {tracking.links.length > 0 && (
@@ -405,7 +405,7 @@ function LinksSection({ tracking, set, liveSlug, published }: { tracking: Tracki
             {shown.map(l => (
               <li key={l.code} className={`rounded-2xl border p-3 space-y-2 ${l.active ? 'border-slate-200' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input value={l.label} maxLength={120} onChange={e => update(l.code, { label: e.target.value })} className="flex-1 min-w-[160px] rounded-lg border border-transparent hover:border-slate-200 focus:border-sky-400 px-2 py-1 text-sm font-bold outline-none" />
+                  <input value={l.label} maxLength={120} onChange={e => update(l.code, { label: e.target.value })} className="flex-1 min-w-[160px] rounded-lg border border-transparent hover:border-slate-200 focus:border-(color:--ad-ink) px-2 py-1 text-sm font-bold outline-none" />
                   <Toggle checked={l.active} onChange={active => update(l.code, { active })} label={l.active ? 'فعال' : 'غیرفعال'} />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

@@ -93,14 +93,14 @@ function FeedbackPanel({ id, token, revision, missing, onClose }: { id: string; 
             {done === 'approved' ? 'تأیید شما ثبت شد. طراح دعوتنامه مطلع می‌شود.' : 'نظر شما ثبت شد. می‌توانید نظر دیگری هم بنویسید.'}
           </div>
         ) : null}
-        <input value={name} onChange={e => setName(e.target.value)} maxLength={120} placeholder="نام شما" className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-sky-500" />
+        <input value={name} onChange={e => setName(e.target.value)} maxLength={120} placeholder="نام شما" className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-(color:--ad-ink)" />
         <textarea
           value={message}
           onChange={e => setMessage(e.target.value)}
           maxLength={2000}
           rows={4}
           placeholder="مثلاً: شماره غرفه را ۱۲ بنویسید، لوگوی جدید را ارسال می‌کنیم، …"
-          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-sky-500 leading-relaxed"
+          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-(color:--ad-ink) leading-relaxed"
         />
         {error && <p className="text-xs font-bold text-rose-600">{error}</p>}
         <div className="flex flex-wrap gap-2">

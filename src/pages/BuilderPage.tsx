@@ -27,6 +27,7 @@ import InvitationView from '../invitation/InvitationView';
 import { api, ApiError, editUrl, getAdminPassword, getMyInvitations, inviteUrl, saveMyInvitation, serverMeta, setAdminPassword, setEditAuth, updateMyInvitation, type Feedback, type RecordStatus, type RecordView } from '../lib/api';
 import { previewUrl, route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
+import { useAdminTheme } from '../lib/adminTheme';
 import { blankInvitation, ITEMS, sanitizeInvitation, STEP, validateForPublish, type CopyMode, type InvitationConfig, type Issue } from '../shared/invitation';
 import { ensureContrast } from '../shared/color';
 import { BasicsStep, BrandStep, EnglishStep, EventStep, GuestsStep, MediaStep, TextsStep, type SlugState, type Update } from '../builder/steps';
@@ -98,6 +99,8 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const [step, setStep] = useState(0);
   const [slugState, setSlugState] = useState<SlugState>('idle');
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  // Glass admin in this invitation's own palette (live while the brand colours are edited)
+  const palette = useAdminTheme(loadState === 'ready' ? config.theme : null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -370,8 +373,8 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
 
   if (loadState === 'loading') {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-100">
-        <Loader2 className="w-8 h-8 animate-spin text-sky-500" />
+      <div className="min-h-[100dvh] flex items-center justify-center admin-bg">
+        <Loader2 className="w-8 h-8 animate-spin text-(color:--ad-ink)" />
       </div>
     );
   }
@@ -387,11 +390,11 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const previewLang = step === STEP.english && config.en.enabled ? 'en' : 'fa';
 
   return (
-    <div className="min-h-[100dvh] bg-slate-100 text-slate-900">
+    <div className="min-h-[100dvh] admin-bg text-slate-900" style={palette}>
       {/* Header */}
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
+      <header className="sticky top-0 z-30 glass !border-x-0 !border-t-0 !rounded-none">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-2 sm:gap-3">
-          <a href={route()} className="p-2 -mr-2 rounded-xl hover:bg-slate-100 text-slate-600" title="صفحه اصلی">
+          <a href={route()} className="p-2 -mr-2 rounded-xl hover:bg-white/70 text-slate-600" title="صفحه اصلی">
             <Home className="w-5 h-5" />
           </a>
           <div className="min-w-0">
@@ -402,17 +405,17 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
           <SaveIndicator state={saveState} error={saveError} lastSaved={lastSaved} onSave={() => save(config)} />
           {record && (
             <>
-              <button onClick={() => setHistoryOpen(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600" title="تاریخچه تغییرات">
+              <button onClick={() => setHistoryOpen(true)} className="p-2 rounded-xl hover:bg-white/70 text-slate-600" title="تاریخچه تغییرات">
                 <History className="w-5 h-5" />
               </button>
-              <button onClick={() => setCopyOpen(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
+              <button onClick={() => setCopyOpen(true)} className="p-2 rounded-xl hover:bg-white/70 text-slate-600" title="ساخت دعوتنامه جدید از روی این دعوتنامه">
                 <CopyPlus className="w-5 h-5" />
               </button>
             </>
           )}
           {!record && (
             <div className="relative">
-              <button onClick={() => setMenuOpen(o => !o)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600" aria-label="گزینه‌ها">
+              <button onClick={() => setMenuOpen(o => !o)} className="p-2 rounded-xl hover:bg-white/70 text-slate-600" aria-label="گزینه‌ها">
                 <MoreVertical className="w-5 h-5" />
               </button>
               {menuOpen && (
@@ -435,9 +438,9 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
                 <li key={s.title} className="flex items-center gap-1">
                   <button
                     onClick={() => goStep(i)}
-                    className={`flex items-center gap-2 rounded-full pl-3 pr-1 py-1 text-xs font-bold transition ${i === step ? 'bg-sky-500 text-white' : bad ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`flex items-center gap-2 rounded-full pl-3 pr-1 py-1 text-xs font-bold transition ${i === step ? 'btn-ad text-white' : bad ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-600 hover:bg-white/70'}`}
                   >
-                    <span className={`relative w-6 h-6 rounded-full flex items-center justify-center ${i === step ? 'bg-white/25' : bad ? 'bg-rose-100' : 'bg-slate-200'}`}>
+                    <span className={`relative w-6 h-6 rounded-full flex items-center justify-center ${i === step ? 'bg-white/25' : bad ? 'bg-rose-100' : 'bg-white/80 border border-slate-200'}`}>
                       {(i + 1).toLocaleString('fa-IR')}
                       {open > 0 && <span className={`absolute -top-0.5 -left-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${bad ? 'bg-rose-500' : 'bg-amber-400'}`} />}
                     </span>
@@ -455,9 +458,9 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
         {/* Form */}
         <main className="space-y-4 pb-28 md:pb-8 min-w-0">
           {restorable && (
-            <div className="rounded-2xl bg-sky-50 border border-sky-200 p-4 flex flex-wrap items-center gap-3">
-              <History className="w-5 h-5 text-sky-600" />
-              <p className="text-sm text-sky-900 flex-1 min-w-[200px]">
+            <div className="rounded-2xl bg-(color:--ad-ink)/10 border border-(color:--ad-ink)/25 p-4 flex flex-wrap items-center gap-3">
+              <History className="w-5 h-5 text-(color:--ad-ink)" />
+              <p className="text-sm text-(color:--ad-ink) flex-1 min-w-[200px]">
                 تغییرات ذخیره‌نشده‌ای از {new Date(restorable.savedAt).toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' })} روی این دستگاه پیدا شد.
               </p>
               <button
@@ -465,7 +468,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
                   setConfig(restorable.config);
                   setRestorable(null);
                 }}
-                className="rounded-xl bg-sky-500 text-white text-xs font-bold px-3 py-2"
+                className="rounded-xl btn-ad text-white text-xs font-bold px-3 py-2"
               >
                 بازیابی
               </button>
@@ -474,7 +477,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
                   localStorage.removeItem(localEditKey(record!.id));
                   setRestorable(null);
                 }}
-                className="rounded-xl border border-sky-300 text-sky-800 text-xs font-bold px-3 py-2"
+                className="rounded-xl border border-(color:--ad-ink)/40 text-(color:--ad-ink) text-xs font-bold px-3 py-2"
               >
                 نادیده گرفتن
               </button>
@@ -537,7 +540,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
           )}
 
           {/* Navigation */}
-          <div className="fixed md:static bottom-0 inset-x-0 z-20 bg-white/95 md:bg-transparent backdrop-blur border-t md:border-0 border-slate-200 p-3 md:p-0 flex items-center gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="fixed md:static bottom-0 inset-x-0 z-20 bg-white/80 md:bg-transparent backdrop-blur-xl border-t md:border-0 border-white p-3 md:p-0 flex items-center gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <button
               onClick={() => goStep(Math.max(0, step - 1))}
               disabled={step === 0}
@@ -550,7 +553,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
             </button>
             <div className="flex-1" />
             {!isLast && (
-              <button onClick={() => goStep(step + 1)} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-6 py-3 font-black text-white bg-sky-500 hover:bg-sky-600 shadow-lg shadow-sky-500/20">
+              <button onClick={() => goStep(step + 1)} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-6 py-3 font-black text-white btn-ad hover:brightness-110 shadow-lg shadow-(color:--ad-ink)/20">
                 مرحله بعد <ArrowLeft className="w-4 h-4" />
               </button>
             )}
@@ -639,12 +642,12 @@ function PhoneFrame({ children }: { children: React.ReactNode }) {
 
 function CenteredMessage({ title, text, retry }: { title: string; text: string; retry?: boolean }) {
   return (
-    <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-3 bg-slate-100 p-6 text-center">
+    <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-3 admin-bg p-6 text-center">
       <p className="text-2xl font-black text-slate-900">{title}</p>
       <p className="text-slate-500">{text}</p>
       <div className="flex gap-3 mt-3">
         {retry && (
-          <button onClick={() => window.location.reload()} className="rounded-xl bg-sky-500 text-white font-bold px-4 py-2">
+          <button onClick={() => window.location.reload()} className="rounded-xl btn-ad text-white font-bold px-4 py-2">
             تلاش دوباره
           </button>
         )}
@@ -676,16 +679,16 @@ function AdminGate({ isEdit, onUnlock }: { isEdit: boolean; onUnlock: () => void
     setAdminPassword('');
   }
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-slate-100 p-6">
-      <form onSubmit={submit} className="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 w-full max-w-sm text-center space-y-4">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center">
+    <div className="min-h-[100dvh] flex items-center justify-center admin-bg p-6">
+      <form onSubmit={submit} className="glass rounded-3xl p-8 w-full max-w-sm text-center space-y-4">
+        <div className="mx-auto w-12 h-12 rounded-2xl bg-(color:--ad-ink)/15 text-(color:--ad-ink) flex items-center justify-center">
           <Lock className="w-6 h-6" />
         </div>
         <h1 className="font-black text-lg">{isEdit ? 'برای ویرایش، لینک ویرایش یا رمز مدیر لازم است' : 'ورود به سازنده دعوتنامه'}</h1>
         {isEdit && <p className="text-xs text-slate-500 leading-relaxed">اگر لینک ویرایش را گم کرده‌اید، مدیر سامانه می‌تواند لینک جدید برایتان صادر کند.</p>}
-        <input type="password" autoFocus value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 outline-none focus:border-sky-500" />
+        <input type="password" autoFocus value={password} onChange={e => setPassword(e.target.value)} placeholder="رمز مدیر" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 outline-none focus:border-(color:--ad-ink)" />
         {error && <p className="text-sm text-rose-600">{error}</p>}
-        <button disabled={busy} className="w-full rounded-xl bg-sky-500 hover:bg-sky-600 disabled:opacity-60 text-white font-black py-3">
+        <button disabled={busy} className="w-full rounded-xl btn-ad hover:brightness-110 disabled:opacity-60 text-white font-black py-3">
           ورود
         </button>
       </form>
@@ -916,7 +919,7 @@ function PublishStep({
           <button
             onClick={onPublish}
             disabled={publishing}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 hover:bg-sky-600 disabled:opacity-60 text-white font-black py-4 shadow-lg shadow-sky-500/20"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl btn-ad hover:brightness-110 disabled:opacity-60 text-white font-black py-4 shadow-lg shadow-(color:--ad-ink)/20"
           >
             {publishing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Rocket className="w-5 h-5" />}
             {liveSlug ? 'انتشار تغییرات برای مهمانان' : 'انتشار نهایی و دریافت لینک'}
