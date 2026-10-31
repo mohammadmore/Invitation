@@ -22,3 +22,5 @@ export function appPath(): string {
 export const inviteUrl = (slug: string) => `${window.location.origin}${route(slug)}`;
 export const editUrl = (id: string, token: string) => `${window.location.origin}${route(`builder/${id}`)}#${token}`;
 export const previewUrl = (id: string, token: string) => `${window.location.origin}${route(`preview/${id}`)}#${token}`;
+export const linkUrl = (slug: string, code: string) => `${inviteUrl(slug)}/${code}`;
+export const repReportUrl = (id: string, repId: string, token: string) => `${window.location.origin}${route(`rep/${id}`)}?rep=${repId}#${token}`;

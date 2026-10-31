@@ -260,8 +260,12 @@ export const SUGGESTIONS = {
 };
 
 /** Replace {company} / {event} / {guest} placeholders in user-written text. */
-export function fillPlaceholders(text: string, c: InvitationConfig, guest = ''): string {
-  return text.replaceAll('{company}', c.company.name).replaceAll('{event}', c.event.title).replaceAll('{guest}', guest);
+export function fillPlaceholders(text: string, c: InvitationConfig, guest = '', rep = ''): string {
+  return text
+    .replaceAll('{company}', c.company.name)
+    .replaceAll('{event}', c.event.title)
+    .replaceAll('{guest}', guest)
+    .replaceAll('{rep}', rep || c.company.name); // no rep link -> the company itself invites
 }
 
 /** Turn literal names back into placeholders (used when copying an invitation). */
@@ -479,7 +483,7 @@ export const isMissing = (c: InvitationConfig, key: ItemKey) => isShown(c, key) 
 // ---------- validation / sanitising (shared by client and server) ----------
 
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
-export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'en', 'fa', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
+export const RESERVED_SLUGS = new Set(['api', 'uploads', 'assets', 'builder', 'preview', 'rep', 'en', 'fa', 'admin', 'new', 'edit', 'static', 'i', 'in', 'login', 'src', 'node_modules']);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -661,7 +665,7 @@ export type IssueField =
   | `en.${string}`;
 
 /** Wizard step numbers (shared so validation can point at the right step). */
-export const STEP = { basics: 0, brand: 1, media: 2, texts: 3, event: 4, english: 5, guests: 6, publish: 7 } as const;
+export const STEP = { basics: 0, brand: 1, media: 2, texts: 3, event: 4, english: 5, guests: 6, links: 7, publish: 8 } as const;
 
 /** English fields that must be filled (when the item is shown) if the English version is on. */
 const EN_REQUIRED: { key: ItemKey | 'companyName' | 'title'; field: keyof EnglishTexts; label: string }[] = [

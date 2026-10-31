@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CircleCheck, Copy, Download, History, Loader2, MessageSquare, RotateCcw, Trash2, TriangleAlert, Users, X, Building2, CalendarRange } from 'lucide-react';
-import { api, type Feedback, type HistoryEntry, type RecordView, type Rsvp, type Stats } from '../lib/api';
+import { CircleCheck, Copy, Download, History, Loader2, MessageSquare, RotateCcw, Trash2, TriangleAlert, Users, X, Building2, CalendarRange } from 'lucide-react';
+import { api, type Feedback, type HistoryEntry, type RecordView, type Rsvp } from '../lib/api';
 import type { CopyMode } from '../shared/invitation';
+import { channelLabel } from '../shared/tracking';
 import { Section } from './ui';
 
 const fa = (n: number) => n.toLocaleString('fa-IR');
@@ -209,70 +210,85 @@ export function FeedbackSection({ id, feedback, revision, onChange }: { id: stri
   );
 }
 
-// ------------------------------------------------------------------ stats
+// ------------------------------------------------------------------ RSVP list
 
-const STAT_LABELS: [string, string][] = [
-  ['view', 'بازدید'],
-  ['unique', 'بازدیدکننده یکتا'],
-  ['enter', 'ورود به دعوتنامه'],
-  ['details', 'مشاهده زمان و مکان'],
-  ['gcal', 'ثبت در گوگل کلندر'],
-  ['ics', 'ثبت در اپل/اوت‌لوک'],
-  ['map', 'کلیک مسیریابی'],
-  ['boothMap', 'نقشه غرفه'],
-  ['share', 'اشتراک‌گذاری'],
-  ['contact', 'تماس'],
-  ['vcard', 'ذخیره در مخاطبین'],
-  ['rsvp', 'اعلام حضور'],
-  ['personal', 'بازدید از لینک شخصی'],
-  ['en', 'نسخه انگلیسی'],
-];
+const dayFa = (d: string) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString('fa-IR', { weekday: 'long', day: 'numeric', month: 'long' }) : 'مشخص نشده');
 
-export function StatsSection({ id }: { id: string }) {
-  const [stats, setStats] = useState<Stats | null>(null);
-  useEffect(() => {
-    api.stats(id).then(setStats).catch(() => setStats({ totals: {}, days: {} }));
-  }, [id]);
-  if (!stats) return null;
-  const days = Object.keys(stats.days).sort().slice(-14);
-  const max = Math.max(1, ...days.map(d => stats.days[d].view ?? 0));
-  const shown = STAT_LABELS.filter(([k]) => stats.totals[k]);
+/** Table of attendance confirmations (with rep/channel when multi-link tracking is used). */
+export function RsvpTable({ list, slug, onDelete }: { list: Rsvp[]; slug: string; onDelete?: (r: Rsvp) => void }) {
+  const total = list.reduce((s, r) => s + r.count, 0);
+  const tracked = list.some(r => r.link);
+  if (!list.length) return <p className="text-sm text-slate-400">هنوز پاسخی ثبت نشده است.</p>;
   return (
-    <Section title="آمار بازدید" description="فقط شمارش کلی ثبت می‌شود؛ هیچ اطلاعات شخصی یا IP مهمانان ذخیره نمی‌شود.">
-      {shown.length === 0 ? (
-        <p className="text-sm text-slate-400 flex items-center gap-2">
-          <BarChart3 className="w-4 h-4" /> هنوز بازدیدی ثبت نشده است.
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm font-bold flex items-center gap-1.5">
+          <Users className="w-4 h-4" /> {fa(list.length)} پاسخ · {fa(total)} نفر
         </p>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {shown.map(([k, label]) => (
-              <div key={k} className="rounded-2xl bg-slate-50 p-3">
-                <p className="text-xl font-black text-slate-900 tabular-nums">{fa(stats.totals[k])}</p>
-                <p className="text-[11px] font-bold text-slate-500">{label}</p>
-              </div>
+        <span className="flex-1" />
+        <button
+          onClick={() =>
+            downloadFile(
+              `rsvp-${slug || 'invitation'}.csv`,
+              toCsv([
+                ['نام', 'تلفن', 'شرکت/سازمان', 'روز حضور', 'تعداد', 'لینک شخصی', 'زبان', 'کارشناس', 'کانال', 'لینک (اعتبار)', 'آخرین لینک', 'ارجاع', 'UTM', 'زمان ثبت'],
+                ...list.map(r => [r.name, r.phone, r.org, r.day ? dayFa(r.day) : '', r.count, r.guest, r.lang, r.repName ?? '', r.channel ? channelLabel(r.channel) : '', r.link ?? '', r.via ?? '', r.referral ? 'بله' : '', r.utm ?? '', when(r.at)]),
+              ]),
+            )
+          }
+          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2"
+        >
+          <Download className="w-4 h-4" /> دانلود اکسل (CSV)
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs text-slate-500">
+            <tr>
+              <th className="p-2 text-right">نام</th>
+              <th className="p-2 text-right">تماس</th>
+              <th className="p-2 text-right">روز</th>
+              <th className="p-2">نفر</th>
+              {tracked && <th className="p-2 text-right">کارشناس / کانال</th>}
+              {onDelete && <th className="p-2" />}
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(r => (
+              <tr key={r.id} className="border-t border-slate-100">
+                <td className="p-2">
+                  <p className="font-bold">{r.name}</p>
+                  {r.org && <p className="text-xs text-slate-500">{r.org}</p>}
+                </td>
+                <td className="p-2 text-xs" dir="ltr">
+                  {r.phone}
+                </td>
+                <td className="p-2 text-xs">{dayFa(r.day)}</td>
+                <td className="p-2 text-center tabular-nums">{fa(r.count)}</td>
+                {tracked && (
+                  <td className="p-2 text-xs">
+                    <p className="font-bold">{r.repName || 'شرکت'}</p>
+                    <p className="text-slate-500">
+                      {r.channel ? channelLabel(r.channel) : 'لینک اصلی'}
+                      {r.referral ? ' · ارجاع' : ''}
+                    </p>
+                  </td>
+                )}
+                {onDelete && (
+                  <td className="p-2">
+                    <button onClick={() => onDelete(r)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" aria-label="حذف">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                )}
+              </tr>
             ))}
-          </div>
-          {days.length > 1 && (
-            <div>
-              <p className="text-xs font-bold text-slate-500 mb-2">بازدید روزانه (۱۴ روز اخیر)</p>
-              <div className="flex items-end gap-1 h-24" dir="ltr">
-                {days.map(d => (
-                  <div key={d} className="flex-1 flex flex-col items-center gap-1" title={`${d}: ${stats.days[d].view ?? 0}`}>
-                    <div className="w-full rounded-t bg-sky-400" style={{ height: `${((stats.days[d].view ?? 0) / max) * 80}px` }} />
-                    <span className="text-[9px] text-slate-400">{new Date(`${d}T12:00:00Z`).toLocaleDateString('fa-IR', { day: 'numeric', month: 'numeric' })}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </Section>
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
-
-// ------------------------------------------------------------------ RSVP list
 
 export function RsvpList({ id, slug }: { id: string; slug: string }) {
   const [list, setList] = useState<Rsvp[] | null>(null);
@@ -289,70 +305,11 @@ export function RsvpList({ id, slug }: { id: string; slug: string }) {
     await api.deleteRsvp(id, r.id).catch(() => {});
     setList(l => l?.filter(x => x.id !== r.id) ?? null);
   };
-  const dayFa = (d: string) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString('fa-IR', { weekday: 'long', day: 'numeric', month: 'long' }) : 'مشخص نشده');
-  const total = list?.reduce((s, r) => s + r.count, 0) ?? 0;
 
   return (
     <Section title="پاسخ‌های اعلام حضور" description="این اطلاعات فقط برای شما (و مدیر) قابل مشاهده است و با حذف دعوتنامه پاک می‌شود.">
       {error && <p className="text-sm text-rose-600">{error}</p>}
-      {list && list.length === 0 && <p className="text-sm text-slate-400">هنوز پاسخی ثبت نشده است.</p>}
-      {list && list.length > 0 && (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm font-bold flex items-center gap-1.5">
-              <Users className="w-4 h-4" /> {fa(list.length)} پاسخ · {fa(total)} نفر
-            </p>
-            <span className="flex-1" />
-            <button
-              onClick={() =>
-                downloadFile(
-                  `rsvp-${slug || id}.csv`,
-                  toCsv([
-                    ['نام', 'تلفن', 'شرکت/سازمان', 'روز حضور', 'تعداد', 'لینک شخصی', 'زبان', 'زمان ثبت'],
-                    ...list.map(r => [r.name, r.phone, r.org, r.day ? dayFa(r.day) : '', r.count, r.guest, r.lang, when(r.at)]),
-                  ]),
-                )
-              }
-              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold px-3 py-2"
-            >
-              <Download className="w-4 h-4" /> دانلود اکسل (CSV)
-            </button>
-          </div>
-          <div className="overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs text-slate-500">
-                <tr>
-                  <th className="p-2 text-right">نام</th>
-                  <th className="p-2 text-right">تماس</th>
-                  <th className="p-2 text-right">روز</th>
-                  <th className="p-2">نفر</th>
-                  <th className="p-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {list.map(r => (
-                  <tr key={r.id} className="border-t border-slate-100">
-                    <td className="p-2">
-                      <p className="font-bold">{r.name}</p>
-                      {r.org && <p className="text-xs text-slate-500">{r.org}</p>}
-                    </td>
-                    <td className="p-2 text-xs" dir="ltr">
-                      {r.phone}
-                    </td>
-                    <td className="p-2 text-xs">{dayFa(r.day)}</td>
-                    <td className="p-2 text-center tabular-nums">{fa(r.count)}</td>
-                    <td className="p-2">
-                      <button onClick={() => remove(r)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" aria-label="حذف">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      {list && <RsvpTable list={list} slug={slug} onDelete={remove} />}
     </Section>
   );
 }

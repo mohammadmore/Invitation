@@ -30,7 +30,11 @@ import { hideSplash } from '../lib/splash';
 import { blankInvitation, ITEMS, sanitizeInvitation, STEP, validateForPublish, type CopyMode, type InvitationConfig, type Issue } from '../shared/invitation';
 import { ensureContrast } from '../shared/color';
 import { BasicsStep, BrandStep, EnglishStep, EventStep, GuestsStep, MediaStep, TextsStep, type SlugState, type Update } from '../builder/steps';
-import { ConflictModal, DuplicateModal, FeedbackSection, HistoryModal, PersonalLinks, RsvpList, StatsSection } from '../builder/panels';
+import { ConflictModal, DuplicateModal, FeedbackSection, HistoryModal, PersonalLinks, RsvpList } from '../builder/panels';
+import LinksStep from '../builder/links';
+import Dashboard from '../builder/dashboard';
+import type { PublicLinkInfo, Tracking } from '../shared/tracking';
+import type { Stats } from '../lib/api';
 import { Section } from '../builder/ui';
 
 const LOCAL_DRAFT_KEY = 'expo-invite-draft';
@@ -45,6 +49,7 @@ const STEPS = [
   { title: 'زمان و مکان', preview: 3 },
   { title: 'نسخه انگلیسی', preview: 1 },
   { title: 'مهمانان', preview: 3 },
+  { title: 'لینک‌ها و کارشناس‌ها', preview: 3 },
   { title: 'انتشار و گزارش', preview: 1 },
 ] as const;
 
@@ -108,6 +113,9 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
   const [conflict, setConflict] = useState<RecordView | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
+  /** Rep card shown in the live preview while the links step is open */
+  const [previewLink, setPreviewLink] = useState<{ link: PublicLinkInfo | null; t: Tracking | null }>({ link: null, t: null });
+  const onPreviewLink = useCallback((link: PublicLinkInfo | null, t: Tracking | null) => setPreviewLink({ link, t }), []);
   const savedJson = useRef('');
   const saving = useRef<Promise<unknown> | null>(null);
 
@@ -484,6 +492,9 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
               {record && config.rsvp.enabled && <RsvpList id={record.id} slug={config.slug} />}
             </>
           )}
+          {step === STEP.links && (
+            <LinksStep recordId={record?.id} slug={config.slug} publishedSlug={record?.publishedSlug ?? ''} onEnsureSaved={async () => (await save(config))?.id ?? null} onPreview={onPreviewLink} />
+          )}
           {step === STEP.publish && (
             <PublishStep
               config={config}
@@ -540,7 +551,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
         <aside className="hidden md:block">
           <div className="sticky top-32">
             <PhoneFrame>
-              <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} />
+              <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} link={step === STEP.links ? previewLink.link : null} repCard={previewLink.t?.settings.repCard ?? true} showCompanyContact={previewLink.t?.settings.showCompanyContact ?? true} />
             </PhoneFrame>
             <p className="text-center text-xs text-slate-500 mt-3">پیش‌نمایش زنده — موارد ناقص با کادر قرمز مشخص شده‌اند</p>
           </div>
@@ -549,7 +560,7 @@ export default function BuilderPage({ recordId: initialId }: { recordId?: string
 
       {showPreview && (
         <div className="fixed inset-0 z-50 bg-slate-950 md:hidden">
-          <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} />
+          <InvitationView config={config} embedded showMissing focus={focus} shareUrl={shareUrl} forcedLang={previewLang} guestName={step === STEP.guests ? 'جناب آقای نمونه' : ''} link={step === STEP.links ? previewLink.link : null} repCard={previewLink.t?.settings.repCard ?? true} showCompanyContact={previewLink.t?.settings.showCompanyContact ?? true} />
           <button onClick={() => setShowPreview(false)} className="absolute top-4 right-4 z-[200] inline-flex items-center gap-1.5 bg-white text-slate-900 rounded-full pl-4 pr-3 py-2 shadow-xl text-sm font-bold" aria-label="بستن پیش‌نمایش">
             <X className="w-5 h-5" /> بازگشت به ویرایش
           </button>
@@ -902,7 +913,32 @@ function PublishStep({
           </button>
         </Section>
       )}
-      {record?.publishedSlug && <StatsSection id={record.id} />}
+      {record?.publishedSlug && <ReportSection id={record.id} config={config} />}
     </>
+  );
+}
+
+/** Monitoring dashboard for a published invitation (overall, or per link/rep/channel when tracking is on). */
+function ReportSection({ id, config }: { id: string; config: InvitationConfig }) {
+  const [data, setData] = useState<{ stats: Stats; tracking: Tracking } | null>(null);
+  useEffect(() => {
+    Promise.all([api.stats(id), api.tracking(id)])
+      .then(([stats, tracking]) => setData({ stats, tracking }))
+      .catch(() => {});
+  }, [id]);
+  if (!data) return null;
+  return (
+    <Section
+      title={data.tracking.settings.enabled ? 'داشبورد پایش لینک‌ها' : 'آمار بازدید'}
+      description="فقط شمارش کلی ثبت می‌شود؛ هیچ اطلاعات شخصی یا IP مهمانان ذخیره نمی‌شود."
+    >
+      <Dashboard
+        stats={data.stats}
+        links={data.tracking.links}
+        reps={data.tracking.reps}
+        trackingEnabled={data.tracking.settings.enabled}
+        eventDates={{ start: config.event.startDate, end: config.event.endDate }}
+      />
+    </Section>
   );
 }

@@ -9,6 +9,7 @@ import { appPath } from './lib/paths';
 const HomePage = lazy(() => import('./pages/HomePage'));
 const BuilderPage = lazy(() => import('./pages/BuilderPage'));
 const PreviewPage = lazy(() => import('./pages/PreviewPage'));
+const RepReportPage = lazy(() => import('./pages/RepReportPage'));
 
 function Router() {
   const path = appPath();
@@ -16,7 +17,9 @@ function Router() {
   if (path === 'builder') return <BuilderPage />;
   if ((m = path.match(/^builder\/([^/]+)$/))) return <BuilderPage recordId={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^preview\/([^/]+)$/))) return <PreviewPage id={decodeURIComponent(m[1]).toLowerCase()} />;
+  if ((m = path.match(/^rep\/([^/]+)$/))) return <RepReportPage id={decodeURIComponent(m[1]).toLowerCase()} />;
   if ((m = path.match(/^([^/]+)$/))) return <ViewerPage slug={decodeURIComponent(m[1]).toLowerCase()} />;
+  if ((m = path.match(/^([^/]+)\/([^/]+)$/))) return <ViewerPage slug={decodeURIComponent(m[1]).toLowerCase()} code={decodeURIComponent(m[2]).toLowerCase()} />;
   return <HomePage />;
 }
 

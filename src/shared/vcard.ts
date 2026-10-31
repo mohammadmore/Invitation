@@ -19,3 +19,20 @@ export function vcardContent(c: InvitationConfig, lang: Lang = 'fa'): string {
   lines.push('END:VCARD');
   return lines.join('\r\n') + '\r\n';
 }
+
+/** vCard of a sales rep (the company as organisation), saved from the rep's invitation link. */
+export function repVcardContent(c: InvitationConfig, rep: { name: string; title: string; phone: string; whatsapp: string; email: string }, lang: Lang = 'fa'): string {
+  const l = localize(c, lang);
+  const company = l.company.name || c.company.name;
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${esc(rep.name || company)}`, `ORG:${esc(company)}`];
+  if (rep.title) lines.push(`TITLE:${esc(rep.title)}`);
+  const phone = normalizePhone(rep.phone || c.contact.phone);
+  if (phone) lines.push(`TEL;TYPE=CELL,VOICE:${phone.startsWith('98') ? '+' : ''}${phone}`);
+  const wa = normalizePhone(rep.whatsapp, true);
+  if (wa && wa !== phone) lines.push(`TEL;TYPE=CELL:+${wa}`);
+  const email = rep.email || c.contact.email;
+  if (email) lines.push(`EMAIL;TYPE=WORK:${email}`);
+  for (const link of contactLinks(c.contact)) if (link.kind === 'website' || link.kind === 'instagram') lines.push(`URL:${link.href}`);
+  lines.push('END:VCARD');
+  return lines.join('\r\n') + '\r\n';
+}

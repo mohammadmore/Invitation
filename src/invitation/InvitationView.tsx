@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Clock, Building, Calendar as CalendarIcon, Share2, ChevronLeft, ChevronRight, Map, Volume2, VolumeX, Copy, ExternalLink, CalendarX, TriangleAlert, Phone, Mail, Globe, Send, MessageCircle, UserPlus, CircleCheck, X, Languages } from 'lucide-react';
 import { contactLinks, CUSTOM_FONT, fillPlaceholders, isFilled, isMissing, isShown, ITEMS, localize, safeUrl, type ContactLink, type InvitationConfig, type ItemKey, type Lang } from '../shared/invitation';
 import { dateText as dateTextOf, dayCount, eventEnded, googleCalendarUrl, icsContent, timeText as timeTextOf } from '../shared/calendar';
-import { vcardContent } from '../shared/vcard';
+import { repVcardContent, vcardContent } from '../shared/vcard';
+import type { PublicLinkInfo } from '../shared/tracking';
 import { strings } from './i18n';
 import { themeColors } from '../shared/color';
 import { apiUrl, asset } from '../lib/paths';
@@ -91,6 +92,12 @@ export interface InvitationViewProps {
   onEvent?: (type: string) => void;
   /** Send an attendance confirmation; absent in previews (nothing is stored there) */
   onRsvp?: (data: RsvpData) => Promise<void>;
+  /** Tracked link this page was opened with (multi-link mode) */
+  link?: PublicLinkInfo | null;
+  /** Show the "your sales rep" card on rep links */
+  repCard?: boolean;
+  /** Also show the company's own contact card under the rep card */
+  showCompanyContact?: boolean;
 }
 
 export interface RsvpData {
@@ -136,7 +143,23 @@ function dayLabel(iso: string, lang: Lang): string {
     : new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(d);
 }
 
-export default function InvitationView({ config, embedded = false, focus, shareUrl, showMissing = false, guestName = '', initialLang = 'fa', forcedLang, onEvent, onRsvp }: InvitationViewProps) {
+export default function InvitationView({
+  config,
+  embedded = false,
+  focus,
+  shareUrl,
+  showMissing = false,
+  guestName = '',
+  initialLang = 'fa',
+  forcedLang,
+  onEvent,
+  onRsvp,
+  link = null,
+  repCard = true,
+  showCompanyContact = true,
+}: InvitationViewProps) {
+  const rep = repCard ? (link?.rep ?? null) : null;
+  const repName = link?.rep?.name ?? '';
   const [userLang, setUserLang] = useState<Lang>(initialLang);
   useEffect(() => {
     if (forcedLang) setUserLang(forcedLang);
@@ -323,7 +346,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
     const url = pageUrl();
     track('share');
     const text =
-      fillPlaceholders(texts.shareText, L, guestName) || T.shareText(event.title, dateText, ready('location') ? event.location : '', ready('booth') ? event.booth : '');
+      fillPlaceholders(texts.shareText, L, guestName, repName) || T.shareText(event.title, dateText, ready('location') ? event.location : '', ready('booth') ? event.booth : '');
     if (navigator.share) {
       try {
         await navigator.share({ title: event.title, text, url });
@@ -345,6 +368,12 @@ export default function InvitationView({ config, embedded = false, focus, shareU
     return `data:text/calendar;charset=utf-8,${encodeURIComponent(icsContent(config, lang))}`;
   }, [config, calendarReady, live, lang]);
   const contacts = useMemo(() => contactLinks(config.contact), [config.contact]);
+  const repContacts = useMemo(() => (rep ? contactLinks({ phone: rep.phone, whatsapp: rep.whatsapp, email: rep.email, website: '', instagram: '', telegram: '' }) : []), [rep]);
+  const repVcardUrl = useMemo(() => {
+    if (!rep) return '';
+    if (live && link) return apiUrl(`invitations/${config.slug}/vcard?link=${link.code}&lang=${lang}`);
+    return `data:text/vcard;charset=utf-8,${encodeURIComponent(repVcardContent(config, rep, lang))}`;
+  }, [rep, live, link, config, lang]);
   const vcardUrl = useMemo(() => {
     if (!contacts.some(c => c.kind === 'phone' || c.kind === 'email' || c.kind === 'whatsapp')) return '';
     if (live) return apiUrl(`invitations/${config.slug}/vcard?lang=${lang}`);
@@ -366,7 +395,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
     fontFamily: `'${fontFamily}', 'Vazirmatn', Tahoma, sans-serif`,
   } as React.CSSProperties;
 
-  const letterParagraphs = fillPlaceholders(texts.letter, L, guestName)
+  const letterParagraphs = fillPlaceholders(texts.letter, L, guestName, repName)
     .split(/\n\s*\n/)
     .map(p => p.trim())
     .filter(Boolean);
@@ -568,7 +597,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   <div className="h-4" />
                 )}
 
-                {ready('welcomeText') && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{fillPlaceholders(event.welcomeText, L, guestName)}</p>}
+                {ready('welcomeText') && <p className="text-slate-600 mb-4 @2xl:mb-6 font-medium text-lg relative z-10 break-words">{fillPlaceholders(event.welcomeText, L, guestName, repName)}</p>}
                 {miss('welcomeText') && <Missing text={ITEMS.welcomeText.missing} className="mb-4" />}
 
                 <button onClick={enter} className={`flex items-center justify-center gap-2 text-white px-8 py-4 rounded-full font-bold shadow-lg transition-all w-full ${btnPrimary}`}>
@@ -594,7 +623,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
               )}
 
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className={`space-y-2 @2xl:space-y-3 ${shown('icon') ? 'pt-8 @2xl:pt-10' : 'pt-1'}`}>
-                {guestName && <p className="text-[15px] @2xl:text-[18px] font-black text-(--c-primary-ink)">{fillPlaceholders(texts.guestGreeting, L, guestName)}</p>}
+                {guestName && <p className="text-[15px] @2xl:text-[18px] font-black text-(--c-primary-ink)">{fillPlaceholders(texts.guestGreeting, L, guestName, repName)}</p>}
                 {miss('letter') && <Missing text={ITEMS.letter.missing} className="py-8" />}
                 {(ready('letter') ? letterParagraphs : []).map((p, i) => (
                   <p key={i} className="text-[14.5px] @2xl:text-[17px] leading-[1.6] @2xl:leading-[1.7] font-medium text-justify whitespace-pre-line break-words">
@@ -762,9 +791,45 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                   </button>
                 )}
 
-                {shown('contact') && contacts.length > 0 && (
+                {rep && (
+                  <div className="mt-1 bg-white/95 backdrop-blur-xl rounded-2xl p-3 @2xl:p-4 shadow-lg text-slate-800 border-2 border-(--c-accent)/30">
+                    <p className="text-xs font-black text-(--c-accent-ink) mb-2 text-center">{T.yourRep}</p>
+                    <div className="flex items-center gap-3 mb-2">
+                      {rep.photo ? (
+                        <img src={asset(rep.photo)} alt={rep.name} onError={hideOnError} className="w-14 h-14 rounded-full object-cover shrink-0 border-2 border-white shadow" />
+                      ) : (
+                        <span className="w-14 h-14 rounded-full bg-(--c-btn-primary) text-white flex items-center justify-center text-xl font-black shrink-0">{rep.name.trim().charAt(0) || '؟'}</span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-black text-base break-words">{rep.name}</p>
+                        {rep.title && <p className="text-xs font-bold text-slate-500 break-words">{rep.title}</p>}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {repContacts.map(c => {
+                        const Icon = CONTACT_ICONS[c.kind];
+                        return (
+                          <a key={c.kind} href={c.href} target={c.kind === 'whatsapp' ? '_blank' : undefined} rel="noopener noreferrer" onClick={() => track('contact')} title={c.label} className="flex flex-col items-center gap-1 w-16 py-2 rounded-xl hover:bg-(--c-accent)/10 transition-colors">
+                            <span className="w-10 h-10 rounded-full bg-(--c-accent)/10 text-(--c-accent-ink) flex items-center justify-center">
+                              <Icon className="w-5 h-5" />
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-600">{T.contactLabels[c.kind]}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                    {repVcardUrl && (
+                      <a href={repVcardUrl} download={`${config.slug || 'contact'}-${link?.code ?? 'rep'}.vcf`} onClick={() => track('vcard')} className="mt-2 flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        <UserPlus className="w-4 h-4" />
+                        {T.saveContact}
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {shown('contact') && contacts.length > 0 && (!rep || showCompanyContact) && (
                   <div className="mt-1 bg-white/90 backdrop-blur-xl rounded-2xl p-3 @2xl:p-4 shadow-lg text-slate-800">
-                    <p className="text-xs font-black text-slate-500 mb-2 text-center">{T.contact}</p>
+                    <p className="text-xs font-black text-slate-500 mb-2 text-center">{rep ? T.companyContact : T.contact}</p>
                     <div className="flex flex-wrap justify-center gap-2">
                       {contacts.map(c => {
                         const Icon = CONTACT_ICONS[c.kind];
@@ -786,7 +851,7 @@ export default function InvitationView({ config, embedded = false, focus, shareU
                         );
                       })}
                     </div>
-                    {vcardUrl && (
+                    {vcardUrl && !rep && (
                       <a href={vcardUrl} download={`${config.slug || 'contact'}.vcf`} onClick={() => track('vcard')} className="mt-2 flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
                         <UserPlus className="w-4 h-4" />
                         {T.saveContact}

@@ -20,8 +20,12 @@ import {
   type Lang,
 } from '../src/shared/invitation';
 import { eventEnded, icsContent } from '../src/shared/calendar';
-import { vcardContent } from '../src/shared/vcard';
+import { repVcardContent, vcardContent } from '../src/shared/vcard';
+import { CODE_RE, emptyTracking, publicLink, publicTracking, sanitizeTracking, type Tracking } from '../src/shared/tracking';
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, type UploadKind } from '../src/shared/uploads';
+
+// Node 18 has no global WebCrypto by default; shared code (src/shared/tracking.ts) uses it.
+if (!(globalThis as any).crypto) (globalThis as any).crypto = crypto.webcrypto;
 
 // ---------------------------------------------------------------- configuration
 
@@ -86,6 +90,8 @@ interface InvitationRecord {
   history: Snapshot[];
   /** Comments / approvals left by the client on the preview link */
   feedback: Feedback[];
+  /** Sales reps, tracked links and their options – live, not part of draft/publish */
+  tracking: Tracking;
 }
 
 interface Snapshot {
@@ -126,13 +132,14 @@ async function readRecord(id: string): Promise<InvitationRecord | null> {
     if (!raw.draft && raw.config) {
       // Migrate the earlier format ({ config, editTokenHash }): it was published.
       const config = sanitizeInvitation(raw.config);
-      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt, revision: 1, history: [], feedback: [] };
+      return { id, draft: config, published: config, publishedAt: raw.updatedAt, editTokenHash: raw.editTokenHash, previewToken: newToken(), createdAt: raw.createdAt, updatedAt: raw.updatedAt, revision: 1, history: [], feedback: [], tracking: emptyTracking() };
     }
     raw.draft = sanitizeInvitation(raw.draft);
     raw.published = raw.published ? sanitizeInvitation(raw.published) : null;
     raw.revision = Number(raw.revision) || 1;
     raw.history = Array.isArray(raw.history) ? raw.history.map((h: Snapshot) => ({ ...h, draft: sanitizeInvitation(h.draft) })) : [];
     raw.feedback = Array.isArray(raw.feedback) ? raw.feedback : [];
+    raw.tracking = raw.tracking ? sanitizeTracking(raw.tracking) : emptyTracking();
     return raw;
   } catch {
     return null;
@@ -172,6 +179,12 @@ async function buildSlugIndex() {
   }
 }
 
+async function publishedRecord(slug: string): Promise<InvitationRecord | null> {
+  const id = slugIndex.get(slug);
+  const rec = id ? await readRecord(id) : null;
+  return rec?.published && rec.published.slug === slug ? rec : null;
+}
+
 async function publishedBySlug(slug: string): Promise<InvitationConfig | null> {
   const id = slugIndex.get(slug);
   const rec = id ? await readRecord(id) : null;
@@ -206,7 +219,14 @@ async function dirSize(dir: string) {
  * the grace period are kept: they may belong to a wizard session that hasn't saved yet.
  */
 async function collectGarbage(graceMs = UPLOAD_GRACE_DAYS * 86_400_000, only?: Set<string>) {
-  const used = new Set((await allRecords()).flatMap(r => [...uploadsOf(r.draft), ...uploadsOf(r.published), ...r.history.flatMap(h => uploadsOf(h.draft))]));
+  const used = new Set(
+    (await allRecords()).flatMap(r => [
+      ...uploadsOf(r.draft),
+      ...uploadsOf(r.published),
+      ...r.history.flatMap(h => uploadsOf(h.draft)),
+      ...r.tracking.reps.filter(x => x.photo.startsWith('uploads/')).map(x => x.photo.slice('uploads/'.length)),
+    ]),
+  );
   const now = Date.now();
   let removed = 0;
   for (const f of await fs.readdir(UPLOADS_DIR)) {
@@ -317,10 +337,15 @@ api.get('/slug/:slug', limit('slug', 120, 60_000), async (req, res) => {
 // ----- public (guests)
 
 api.get('/invitations/:slug', async (req, res) => {
-  const config = await publishedBySlug(req.params.slug.toLowerCase());
-  if (!config) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
+  const rec = await publishedRecord(req.params.slug.toLowerCase());
+  if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   res.set('Cache-Control', 'no-cache');
-  res.json(config);
+  res.json({
+    config: publicVersion(rec.published!),
+    // Unknown or deactivated link codes fall back to the main invitation (link: null), never a 404.
+    link: publicLink(rec.tracking, String(req.query.link || '').toLowerCase()),
+    tracking: publicTracking(rec.tracking),
+  });
 });
 
 /** Real .ics download – far more reliable than data: URLs on iPhone and in-app browsers. */
@@ -335,10 +360,13 @@ const langOf = (req: Request): Lang => (req.query.lang === 'en' ? 'en' : 'fa');
 
 /** Organiser's contact card – opens "add contact" on phones. */
 api.get('/invitations/:slug/vcard', async (req, res) => {
-  const config = await publishedBySlug(req.params.slug.toLowerCase());
-  if (!config) return res.status(404).type('text').send('Not found');
-  res.set({ 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': `attachment; filename="${config.slug}.vcf"`, 'Cache-Control': 'no-cache' });
-  res.send(vcardContent(config, langOf(req)));
+  const rec = await publishedRecord(req.params.slug.toLowerCase());
+  if (!rec) return res.status(404).type('text').send('Not found');
+  const config = publicVersion(rec.published!);
+  const link = publicLink(rec.tracking, String(req.query.link || '').toLowerCase());
+  res.set({ 'Content-Type': 'text/vcard; charset=utf-8', 'Content-Disposition': `attachment; filename="${config.slug}${link?.rep ? `-${link.code}` : ''}.vcf"`, 'Cache-Control': 'no-cache' });
+  // On a rep's link the saved contact is the rep (with the company as organisation).
+  res.send(link?.rep ? repVcardContent(config, link.rep, langOf(req)) : vcardContent(config, langOf(req)));
 });
 
 // ----- attendance confirmations (RSVP)
@@ -355,6 +383,24 @@ interface Rsvp {
   /** Name from a personal link (?to=...), if any */
   guest: string;
   lang: Lang;
+  /** Attribution (multi-link tracking): link credited, its rep and channel, link actually used, UTM */
+  link?: string;
+  repId?: string;
+  repName?: string;
+  channel?: string;
+  via?: string;
+  referral?: boolean;
+  utm?: string;
+}
+
+const cleanUtm = (v: unknown) => clean(v, 80);
+/** Validate a stats key from the browser: "_" or an existing link code, optionally "+ref". */
+function linkKey(t: Tracking, raw: unknown): string {
+  if (!t.settings.enabled || typeof raw !== 'string') return '';
+  const ref = raw.endsWith('+ref');
+  const code = ref ? raw.slice(0, -4) : raw;
+  if (code !== '_' && !t.links.some(l => l.code === code)) return '';
+  return ref && !t.settings.referral ? code : raw;
 }
 
 const rsvpFile = (id: string) => path.join(RSVP_DIR, `${id}.json`);
@@ -380,8 +426,14 @@ const clean = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[
 
 api.post('/invitations/:slug/rsvp', limit('rsvp', 10, 3_600_000), express.json({ limit: '8kb' }), async (req, res) => {
   const slug = req.params.slug.toLowerCase();
-  const config = await publishedBySlug(slug);
-  if (!config || !config.rsvp.enabled) return res.status(404).json({ error: 'not found' });
+  const rec = await publishedRecord(slug);
+  const config = rec?.published;
+  if (!rec || !config || !config.rsvp.enabled) return res.status(404).json({ error: 'not found' });
+  const t = rec.tracking;
+  const attrKey = linkKey(t, req.body?.link);
+  const attrCode = attrKey.replace(/\+ref$/, '');
+  const link = t.links.find(l => l.code === attrCode);
+  const repOf = link?.repId ? t.reps.find(r => r.id === link.repId) : undefined;
   const name = clean(req.body?.name, 120);
   if (!name) return res.status(400).json({ error: 'name required' });
   const day = typeof req.body?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.day) ? req.body.day : '';
@@ -395,37 +447,60 @@ api.post('/invitations/:slug/rsvp', limit('rsvp', 10, 3_600_000), express.json({
     count: Math.min(20, Math.max(1, Math.round(Number(req.body?.count) || 1))),
     guest: clean(req.body?.guest, 120),
     lang: req.body?.lang === 'en' ? 'en' : 'fa',
+    ...(t.settings.enabled
+      ? {
+          link: attrKey,
+          repId: repOf?.id ?? '',
+          repName: repOf?.name ?? '',
+          channel: link?.channel ?? '',
+          via: linkKey(t, req.body?.via),
+          referral: attrKey.endsWith('+ref'),
+          utm: t.settings.utm ? cleanUtm(req.body?.utm) : '',
+        }
+      : {}),
   };
-  await addRsvp(slugIndex.get(slug)!, entry);
-  bumpStat(slugIndex.get(slug)!, 'rsvp');
+  await addRsvp(rec.id, entry);
+  bumpStat(rec.id, 'rsvp', attrKey, entry.utm);
   res.status(201).json({ ok: true });
 });
 
 // ----- visit statistics (aggregated counters only – no IPs or personal data)
 
-const STAT_TYPES = new Set(['view', 'unique', 'enter', 'details', 'gcal', 'ics', 'map', 'boothMap', 'share', 'contact', 'vcard', 'rsvp', 'personal', 'en']);
+const STAT_TYPES = new Set(['view', 'unique', 'linkUnique', 'enter', 'details', 'gcal', 'ics', 'map', 'boothMap', 'share', 'contact', 'vcard', 'rsvp', 'personal', 'en']);
 type DayStats = Record<string, number>;
-const statsCache = new Map<string, Record<string, DayStats>>();
+/** days: totals per day · links: per link key per day · utm: per "source / campaign" totals */
+interface StatsFile {
+  days: Record<string, DayStats>;
+  links: Record<string, Record<string, DayStats>>;
+  utm: Record<string, DayStats>;
+}
+const statsCache = new Map<string, StatsFile>();
 const dirtyStats = new Set<string>();
 const statsFile = (id: string) => path.join(STATS_DIR, `${id}.json`);
 
-async function loadStats(id: string): Promise<Record<string, DayStats>> {
+async function loadStats(id: string): Promise<StatsFile> {
   let s = statsCache.get(id);
   if (!s) {
+    let raw: any = {};
     try {
-      s = JSON.parse(await fs.readFile(statsFile(id), 'utf8')) as Record<string, DayStats>;
+      raw = JSON.parse(await fs.readFile(statsFile(id), 'utf8'));
     } catch {
-      s = {};
+      /* none yet */
     }
+    // Earlier format was just { day: counters }
+    s = raw.days ? { days: raw.days, links: raw.links ?? {}, utm: raw.utm ?? {} } : { days: raw, links: {}, utm: {} };
     statsCache.set(id, s);
   }
   return s;
 }
 const tehranDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date());
-async function bumpStat(id: string, type: string) {
+const inc = (o: DayStats, k: string) => (o[k] = (o[k] ?? 0) + 1);
+async function bumpStat(id: string, type: string, link = '', utm = '') {
   const s = await loadStats(id);
-  const day = (s[tehranDay()] ??= {});
-  day[type] = (day[type] ?? 0) + 1;
+  const day = tehranDay();
+  inc((s.days[day] ??= {}), type);
+  if (link) inc(((s.links[link] ??= {})[day] ??= {}), type);
+  if (utm) inc((s.utm[utm] ??= {}), type);
   dirtyStats.add(id);
 }
 async function flushStats() {
@@ -438,9 +513,9 @@ async function flushStats() {
 setInterval(() => flushStats().catch(console.error), 15_000).unref();
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => flushStats().finally(() => process.exit(0)));
 
-function statTotals(s: Record<string, DayStats>) {
+function statTotals(days: Record<string, DayStats>) {
   const totals: Record<string, number> = {};
-  for (const day of Object.values(s)) for (const [k, v] of Object.entries(day)) totals[k] = (totals[k] ?? 0) + v;
+  for (const day of Object.values(days)) for (const [k, v] of Object.entries(day)) totals[k] = (totals[k] ?? 0) + v;
   return totals;
 }
 
@@ -450,7 +525,10 @@ api.post('/invitations/:slug/event', limit('event', 240, 60_000), express.json({
   const id = slugIndex.get(req.params.slug.toLowerCase());
   if (!id || !STAT_TYPES.has(type)) return res.status(204).end();
   const rec = await readRecord(id);
-  if (rec?.published) await bumpStat(id, type);
+  if (rec?.published) {
+    const t = rec.tracking;
+    await bumpStat(id, type, linkKey(t, body?.link), t.settings.enabled && t.settings.utm ? cleanUtm(body?.utm) : '');
+  }
   res.status(204).end();
 });
 
@@ -498,7 +576,7 @@ type RecordSummary = {
 };
 
 async function summarize(r: InvitationRecord): Promise<RecordSummary> {
-  const totals = statTotals(await loadStats(r.id));
+  const totals = statTotals((await loadStats(r.id)).days);
   const rsvps = await readRsvps(r.id);
   return {
     id: r.id,
@@ -558,7 +636,7 @@ api.post('/records', limit('create', 60, 3_600_000), json, async (req, res) => {
   const now = new Date().toISOString();
   const result = await withSlugLock(async () => {
     const { draft, slugConflict } = applyDraft(req, null, req.body?.config);
-    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [] };
+    const rec: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking: emptyTracking() };
     await writeRecord(rec);
     return { rec, slugConflict };
   });
@@ -716,7 +794,9 @@ api.post('/records/:id/duplicate', limit('create', 60, 3_600_000), json, async (
   const now = new Date().toISOString();
   const draft = sanitizeInvitation(copyInvitation(rec.draft, mode));
   if (!canEditFooter(req)) draft.footer = { ...DEFAULT_FOOTER };
-  const copy: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [] };
+  // Same organiser → keep its sales reps, links and tracking options (new report tokens).
+  const tracking = mode === 'newEvent' ? sanitizeTracking({ ...rec.tracking, reps: rec.tracking.reps.map(r => ({ ...r, reportToken: '' })) }) : emptyTracking();
+  const copy: InvitationRecord = { id: newId(), draft, published: null, publishedAt: null, editTokenHash: sha256(editToken), previewToken: newToken(), createdAt: now, updatedAt: now, revision: 1, history: [], feedback: [], tracking };
   await writeRecord(copy);
   res.status(201).json({ ...(await recordView(copy)), editToken });
 });
@@ -758,8 +838,61 @@ api.delete('/records/:id/rsvps/:rid', async (req, res) => {
 api.get('/records/:id/stats', async (req, res) => {
   const rec = await editable(req, res);
   if (!rec) return;
-  const days = await loadStats(rec.id);
-  res.set('Cache-Control', 'no-store').json({ totals: statTotals(days), days });
+  const stats = await loadStats(rec.id);
+  res.set('Cache-Control', 'no-store').json({ totals: statTotals(stats.days), ...stats });
+});
+
+// ----- links & sales reps (live settings, effective immediately)
+
+api.get('/records/:id/tracking', async (req, res) => {
+  const rec = await editable(req, res);
+  if (!rec) return;
+  res.set('Cache-Control', 'no-store').json(rec.tracking);
+});
+
+api.put('/records/:id/tracking', express.json({ limit: '512kb' }), async (req, res) => {
+  const out = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return { status: 404, body: { error: 'دعوتنامه پیدا نشد' } };
+    if (!canEdit(req, rec)) return { status: 401, body: { error: 'اجازه ویرایش این دعوتنامه را ندارید' } };
+    const tracking = sanitizeTracking(req.body?.tracking);
+    // Keep existing report tokens (the client never needs to send them back unchanged)
+    for (const r of tracking.reps) {
+      const old = rec.tracking.reps.find(o => o.id === r.id);
+      if (old && !req.body?.tracking?.reps?.find((x: any) => x?.id === r.id)?.reportToken) r.reportToken = old.reportToken;
+    }
+    await writeRecord({ ...rec, tracking, updatedAt: new Date().toISOString() });
+    return { status: 200, body: tracking };
+  });
+  res.status(out.status).json(out.body);
+});
+
+/** A sales rep's own read-only report: their links, visits and RSVPs only. */
+api.get('/rep-report/:id', limit('report', 120, 60_000), async (req, res) => {
+  const rec = await readRecord(req.params.id);
+  const t = rec?.tracking;
+  const rep = t?.reps.find(r => r.id === String(req.query.rep || ''));
+  if (!rec || !t || !rep || !t.settings.enabled || !t.settings.repDashboards || !safeEqual(String(req.query.k || ''), rep.reportToken)) {
+    return res.status(404).json({ error: 'گزارش پیدا نشد' });
+  }
+  const links = t.links.filter(l => l.repId === rep.id);
+  const keys = new Set(links.flatMap(l => [l.code, `${l.code}+ref`]));
+  const stats = await loadStats(rec.id);
+  const linkStats = Object.fromEntries(Object.entries(stats.links).filter(([k]) => keys.has(k)));
+  const days: Record<string, DayStats> = {};
+  for (const perDay of Object.values(linkStats)) for (const [day, c] of Object.entries(perDay)) for (const [k, v] of Object.entries(c)) (days[day] ??= {})[k] = (days[day][k] ?? 0) + v;
+  const rsvps = (await readRsvps(rec.id)).filter(r => r.repId === rep.id);
+  const c = rec.published ?? rec.draft;
+  res.set('Cache-Control', 'no-store').json({
+    company: c.company.name,
+    event: c.event.title,
+    slug: rec.published?.slug ?? '',
+    eventDates: { start: c.event.startDate, end: c.event.endDate },
+    rep: { id: rep.id, name: rep.name, title: rep.title },
+    links,
+    stats: { totals: statTotals(days), days, links: linkStats, utm: {} },
+    rsvps,
+  });
 });
 
 // ---------------------------------------------------------------- uploads
@@ -873,8 +1006,11 @@ async function renderPage(html: string, req: Request): Promise<{ status: number;
   const rel = relPath(req);
   if (!rel || rel === 'builder' || rel.startsWith('builder/')) return { status: 200, html };
   if (rel.startsWith('preview/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
-  if (rel.includes('/')) return { status: 404, html };
-  const slug = decodeURIComponent(rel).toLowerCase();
+  if (rel.startsWith('rep/')) return { status: 200, html: html.replace('<head>', '<head>\n    <meta name="robots" content="noindex">') };
+  const parts = rel.split('/');
+  // <slug>/<link code>: tracked link of a published invitation
+  if (parts.length > 2 || (parts.length === 2 && !CODE_RE.test(parts[1].toLowerCase()))) return { status: 404, html };
+  const slug = decodeURIComponent(parts[0]).toLowerCase();
   const c = await publishedBySlug(slug);
   if (!c) return { status: 404, html };
 
@@ -889,7 +1025,7 @@ async function renderPage(html: string, req: Request): Promise<{ status: number;
     `<meta property="og:site_name" content="${escapeHtml(c.company.name)}">`,
     `<meta property="og:title" content="${escapeHtml(title)}">`,
     `<meta property="og:description" content="${escapeHtml(desc)}">`,
-    `<meta property="og:url" content="${escapeHtml(`${base}/${c.slug}`)}">`,
+    `<meta property="og:url" content="${escapeHtml(`${base}/${rel}`)}">`,
     image ? `<meta property="og:image" content="${escapeHtml(`${base}/${image}`)}">` : '',
     `<meta name="twitter:card" content="${c.company.shareImage ? 'summary_large_image' : 'summary'}">`,
     `<meta name="theme-color" content="${c.theme.background}">`,

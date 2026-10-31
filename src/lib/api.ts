@@ -1,6 +1,7 @@
 import type { CopyMode, InvitationConfig, Issue, IssueField, Lang } from '../shared/invitation';
 import { extOf, NEEDS_TRANSCODE, UPLOAD_RULES, VIDEO_WARN_MB, type UploadKind } from '../shared/uploads';
 import { apiUrl } from './paths';
+import type { PublicLinkInfo, PublicTracking, Tracking, TrackedLink } from '../shared/tracking';
 
 export { inviteUrl, editUrl } from './paths';
 export type { UploadKind };
@@ -116,11 +117,34 @@ export interface Rsvp {
   count: number;
   guest: string;
   lang: Lang;
+  link?: string;
+  repId?: string;
+  repName?: string;
+  channel?: string;
+  via?: string;
+  referral?: boolean;
+  utm?: string;
 }
 
+export type DayCounters = Record<string, number>;
 export interface Stats {
-  totals: Record<string, number>;
-  days: Record<string, Record<string, number>>;
+  totals: DayCounters;
+  days: Record<string, DayCounters>;
+  /** Per link key ("code", "_" = main link, "+ref" suffix = shared by guests) per day */
+  links: Record<string, Record<string, DayCounters>>;
+  /** Per "utm_source / utm_campaign" totals */
+  utm: Record<string, DayCounters>;
+}
+
+export interface RepReport {
+  company: string;
+  event: string;
+  slug: string;
+  eventDates: { start: string; end: string };
+  rep: { id: string; name: string; title: string };
+  links: TrackedLink[];
+  stats: Stats;
+  rsvps: Rsvp[];
 }
 
 export const api = {
@@ -129,12 +153,13 @@ export const api = {
   slugAvailable: (slug: string, ownId?: string) =>
     request<{ available: boolean; valid: boolean }>('GET', `slug/${encodeURIComponent(slug)}${ownId ? `?id=${encodeURIComponent(ownId)}` : ''}`),
   /** Published invitation (guests) */
-  get: (slug: string) => request<InvitationConfig>('GET', `invitations/${encodeURIComponent(slug)}`),
+  get: (slug: string, link = '') =>
+    request<{ config: InvitationConfig; link: PublicLinkInfo | null; tracking: PublicTracking }>('GET', `invitations/${encodeURIComponent(slug)}${link ? `?link=${encodeURIComponent(link)}` : ''}`),
   /** Draft preview for the client (read-only token) */
   preview: (id: string, token: string) => request<{ config: InvitationConfig; published: boolean; updatedAt: string; revision: number }>('GET', `preview/${encodeURIComponent(id)}?k=${encodeURIComponent(token)}`),
   sendFeedback: (id: string, token: string, body: { name: string; message: string; approved: boolean; revision: number }) =>
     request<{ ok: boolean }>('POST', `preview/${encodeURIComponent(id)}/feedback?k=${encodeURIComponent(token)}`, body),
-  rsvp: (slug: string, body: { name: string; phone: string; org: string; day: string; count: number; guest: string; lang: Lang }) => request<{ ok: boolean }>('POST', `invitations/${encodeURIComponent(slug)}/rsvp`, body),
+  rsvp: (slug: string, body: { name: string; phone: string; org: string; day: string; count: number; guest: string; lang: Lang; link?: string; via?: string; utm?: string }) => request<{ ok: boolean }>('POST', `invitations/${encodeURIComponent(slug)}/rsvp`, body),
   list: () => request<RecordSummary[]>('GET', 'records'),
   getRecord: (id: string) => request<RecordView>('GET', `records/${encodeURIComponent(id)}`),
   createRecord: (config: InvitationConfig) => request<RecordView & { editToken: string; slugConflict: boolean }>('POST', 'records', { config }),
@@ -148,6 +173,9 @@ export const api = {
   rsvps: (id: string) => request<Rsvp[]>('GET', `records/${encodeURIComponent(id)}/rsvps`),
   deleteRsvp: (id: string, rid: string) => request<{ ok: boolean }>('DELETE', `records/${encodeURIComponent(id)}/rsvps/${rid}`),
   stats: (id: string) => request<Stats>('GET', `records/${encodeURIComponent(id)}/stats`),
+  tracking: (id: string) => request<Tracking>('GET', `records/${encodeURIComponent(id)}/tracking`),
+  saveTracking: (id: string, tracking: Tracking) => request<Tracking>('PUT', `records/${encodeURIComponent(id)}/tracking`, { tracking }),
+  repReport: (id: string, repId: string, token: string) => request<RepReport>('GET', `rep-report/${encodeURIComponent(id)}?rep=${encodeURIComponent(repId)}&k=${encodeURIComponent(token)}`),
   unpublish: (id: string) => request<RecordView>('POST', `records/${encodeURIComponent(id)}/unpublish`),
   remove: (id: string) => request<{ ok: boolean }>('DELETE', `records/${encodeURIComponent(id)}`),
   /** Admin only: issue a new edit link (the old one stops working). */
@@ -393,10 +421,10 @@ export function forgetMyInvitation(id: string) {
 }
 
 /** Fire-and-forget visit statistics (guests only; never blocks the page). */
-export function trackEvent(slug: string, type: string) {
+export function trackEvent(slug: string, type: string, dims: { link?: string; utm?: string } = {}) {
   try {
     const url = apiUrl(`invitations/${encodeURIComponent(slug)}/event`);
-    const body = JSON.stringify({ type });
+    const body = JSON.stringify({ type, ...dims });
     if (navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) return;
     fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
   } catch {

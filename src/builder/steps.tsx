@@ -464,7 +464,7 @@ export function TextsStep({ config, update, issues, previewAt, canEditFooter }: 
           action={!config.texts.letter.trim() && <SuggestButton onClick={() => update('texts', { letter: SUGGESTIONS.letter })} />}
           hint={
             <>
-              برای شروع پاراگراف جدید یک خط خالی بگذارید. می‌توانید از <code className="bg-slate-100 rounded px-1">{'{company}'}</code> و <code className="bg-slate-100 rounded px-1">{'{event}'}</code> به‌جای نام شرکت و نمایشگاه استفاده کنید.
+              برای شروع پاراگراف جدید یک خط خالی بگذارید. می‌توانید از <code className="bg-slate-100 rounded px-1">{'{company}'}</code> و <code className="bg-slate-100 rounded px-1">{'{event}'}</code> به‌جای نام شرکت و نمایشگاه استفاده کنید؛ در حالت چند لینک، <code className="bg-slate-100 rounded px-1">{"{rep}"}</code> نام کارشناس است.
             </>
           }
         >
