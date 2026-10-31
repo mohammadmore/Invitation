@@ -37,8 +37,23 @@ body {
   animation: fluid-ink 10s ease-in-out infinite;
 }
 
+@keyframes liquid-a {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  35% { transform: translate(3.5%, -2.5%) rotate(7deg) scale(1.07); }
+  70% { transform: translate(-1.5%, 3%) rotate(-4deg) scale(1.02); }
+  100% { transform: translate(-3.5%, 1%) rotate(-8deg) scale(1.09); }
+}
+@keyframes liquid-b {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1.06); }
+  40% { transform: translate(-4%, 2.5%) rotate(-9deg) scale(1); }
+  75% { transform: translate(2%, -3%) rotate(5deg) scale(1.1); }
+  100% { transform: translate(4%, 1.5%) rotate(10deg) scale(1.03); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-gradient-btn { animation: none; }
+  .animate-gradient-btn,
+  .admin-bg::before,
+  .admin-bg::after { animation: none; }
 }
 
 /* Soft light/dark switch (see fade() in src/lib/adminTheme.tsx) */
@@ -70,20 +85,47 @@ body {
 }
 
 @layer components {
+  /* Page background: base colour + two blob layers that drift slowly and independently,
+     so the colours flow into each other like liquid. Only transform is animated
+     (GPU-composited, no repaint per frame). */
   .admin-bg {
+    --blob-1: 42%;
+    --blob-2: 32%;
+    --blob-3: 34%;
     background-color: var(--ad-base, #f5f3ff);
-    background-image:
-      radial-gradient(42rem 32rem at 100% -5%, color-mix(in srgb, var(--ad-1) 42%, transparent), transparent 70%),
-      radial-gradient(36rem 30rem at -10% 35%, color-mix(in srgb, var(--ad-2) 32%, transparent), transparent 70%),
-      radial-gradient(40rem 34rem at 70% 110%, color-mix(in srgb, var(--ad-3) 34%, transparent), transparent 70%);
-    background-attachment: fixed;
+    isolation: isolate;
   }
   .ui-dark .admin-bg,
   .ui-dark.admin-bg {
+    --blob-1: 45%;
+    --blob-2: 35%;
+    --blob-3: 38%;
+  }
+  .admin-bg::before,
+  .admin-bg::after {
+    content: '';
+    position: fixed;
+    inset: -25%;
+    z-index: -1;
+    pointer-events: none;
+    will-change: transform;
+  }
+  .admin-bg::before {
     background-image:
-      radial-gradient(42rem 32rem at 100% -5%, color-mix(in srgb, var(--ad-1) 45%, transparent), transparent 70%),
-      radial-gradient(36rem 30rem at -10% 40%, color-mix(in srgb, var(--ad-2) 35%, transparent), transparent 70%),
-      radial-gradient(40rem 34rem at 70% 110%, color-mix(in srgb, var(--ad-3) 38%, transparent), transparent 70%);
+      radial-gradient(42rem 32rem at 83% 13%, color-mix(in srgb, var(--ad-1) var(--blob-1), transparent), transparent 70%),
+      radial-gradient(40rem 34rem at 63% 90%, color-mix(in srgb, var(--ad-3) var(--blob-3), transparent), transparent 70%);
+    animation: liquid-a 41s ease-in-out infinite alternate;
+  }
+  .admin-bg::after {
+    background-image:
+      radial-gradient(36rem 30rem at 10% 40%, color-mix(in srgb, var(--ad-2) var(--blob-2), transparent), transparent 70%),
+      radial-gradient(26rem 22rem at 45% 55%, color-mix(in srgb, var(--ad-1) 14%, transparent), transparent 70%);
+    animation: liquid-b 57s ease-in-out infinite alternate;
+  }
+  /* For pages that run for hours on a phone (booth check-in): same look, no motion */
+  .admin-bg-still::before,
+  .admin-bg-still::after {
+    animation: none;
   }
   .glass {
     background-color: var(--glass-bg);

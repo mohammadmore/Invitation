@@ -306,7 +306,7 @@ export default function CheckinPage({ id }: { id: string }) {
 
   if (fatal) {
     return (
-      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 admin-bg text-slate-50 p-6 text-center" style={palette}>
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-2 admin-bg admin-bg-still text-slate-50 p-6 text-center" style={palette}>
         <p className="text-2xl font-black">{fatal === 'revoked' ? 'صفحه ثبت حضور در دسترس نیست' : 'اتصال برقرار نشد'}</p>
         <p className="text-slate-400 text-sm leading-relaxed">
           {fatal === 'revoked'
@@ -323,14 +323,14 @@ export default function CheckinPage({ id }: { id: string }) {
   }
   if (!info) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center admin-bg" style={palette}>
+      <div className="min-h-[100dvh] flex items-center justify-center admin-bg admin-bg-still" style={palette}>
         <Loader2 className="w-8 h-8 animate-spin text-(color:--ad-ink)" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-[100dvh] admin-bg text-slate-50 pb-24" style={palette}>
+    <div className="min-h-[100dvh] admin-bg admin-bg-still text-slate-50 pb-24" style={palette}>
       <header className="px-4 pt-4 pb-3 space-y-3 max-w-xl mx-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
