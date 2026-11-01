@@ -156,6 +156,23 @@ export interface RepReport {
   rsvps: Rsvp[];
 }
 
+/** Install health (settings page) */
+export interface Health {
+  ip: string;
+  ipOk: boolean;
+  node: string;
+  nodeOk: boolean;
+  dataDir: string;
+  dataWritable: boolean;
+  dataOutsideApp: boolean;
+  dataNotPublic: boolean;
+  publicUrl: string;
+  basePath: string;
+  passwordStrong: boolean;
+  ffmpeg: boolean;
+  sms: boolean;
+}
+
 export const api = {
   meta: () => request<ServerMeta>('GET', 'meta'),
   auth: () => request<{ ok: boolean; admin: boolean }>('POST', 'auth'),
@@ -196,6 +213,7 @@ export const api = {
   tracking: (id: string) => request<Tracking>('GET', `records/${encodeURIComponent(id)}/tracking`),
   saveTracking: (id: string, tracking: Tracking) => request<Tracking>('PUT', `records/${encodeURIComponent(id)}/tracking`, { tracking }),
   settings: () => request<{ sms: SmsSettings; sentToday: number }>('GET', 'settings'),
+  health: () => request<Health>('GET', 'health'),
   saveSettings: (sms: SmsSettings) => request<{ sms: SmsSettings; sentToday: number }>('PUT', 'settings', { sms }),
   testSms: (to: string, message: string) => request<{ ok: boolean; status: number; detail: string }>('POST', 'settings/test-sms', { to, message }),
   notify: (id: string) => request<{ notify: NotifySettings; smsReady: boolean; numberFormat: 'local' | 'intl'; log: NotifyLogEntry[] }>('GET', `records/${encodeURIComponent(id)}/notify`),

@@ -8,6 +8,7 @@ cpSync('dist', 'release/dist', { recursive: true });
 cpSync('dist-server', 'release/dist-server', { recursive: true });
 copyFileSync('.env.example', 'release/.env.example');
 copyFileSync('DEPLOY.md', 'release/DEPLOY.md');
+copyFileSync('docs/CPANEL-CHECKLIST.md', 'release/CPANEL-CHECKLIST.md');
 // Startup file for cPanel "Setup Node.js App" / Phusion Passenger (CommonJS entry point).
 writeFileSync('release/app.js', "process.env.NODE_ENV = process.env.NODE_ENV || 'production';\nrequire('./dist-server/server.cjs');\n");
 writeFileSync(

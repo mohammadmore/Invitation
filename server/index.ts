@@ -294,8 +294,10 @@ setInterval(() => {
   for (const [k, v] of buckets) if (!v.some(t => now - t < 3_600_000)) buckets.delete(k);
 }, 600_000).unref();
 
+const clientIp = (req: Request) => req.ip || req.socket.remoteAddress || 'unknown';
+
 const limit = (name: string, max: number, windowMs: number) => (req: Request, res: Response, next: NextFunction) => {
-  if (hit(`${name}:${req.ip}`, windowMs) > max) return res.status(429).json({ error: 'تعداد درخواست‌ها زیاد است؛ کمی بعد دوباره تلاش کنید.' });
+  if (hit(`${name}:${clientIp(req)}`, windowMs) > max) return res.status(429).json({ error: 'تعداد درخواست‌ها زیاد است؛ کمی بعد دوباره تلاش کنید.' });
   next();
 };
 
@@ -318,7 +320,7 @@ function isAdmin(req: Request): boolean {
   let ok = false;
   if (ADMIN_PASSWORD && given) {
     ok = safeEqual(given, ADMIN_PASSWORD);
-    if (!ok) hit(`authfail:${req.ip}`, AUTH_FAIL_WINDOW); // counted once per request
+    if (!ok) hit(`authfail:${clientIp(req)}`, AUTH_FAIL_WINDOW); // counted once per request
   }
   adminCache.set(req, ok);
   return ok;
@@ -331,7 +333,7 @@ function canEdit(req: Request, rec: InvitationRecord): boolean {
   const token = String(req.get('x-edit-token') || '');
   if (!token) return false;
   if (safeEqual(sha256(token), rec.editTokenHash)) return true;
-  hit(`authfail:${req.ip}`, AUTH_FAIL_WINDOW);
+  hit(`authfail:${clientIp(req)}`, AUTH_FAIL_WINDOW);
   return false;
 }
 
@@ -339,7 +341,15 @@ function canEdit(req: Request, rec: InvitationRecord): boolean {
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', TRUST_PROXY === 'true' ? true : TRUST_PROXY === 'false' ? false : TRUST_PROXY);
+// Default ("loopback"): trust the proxy hop that sits on this machine. That is a loopback
+// address (nginx, Apache) or no address at all: cPanel's Passenger talks to the app over a
+// Unix socket. Without the second case every visitor would share one IP, so one person's
+// wrong passwords would lock out the admin and the RSVP limit would apply to all guests at once.
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+app.set(
+  'trust proxy',
+  TRUST_PROXY === 'true' ? true : TRUST_PROXY === 'false' ? false : TRUST_PROXY === 'loopback' ? (addr: string, i: number) => i === 0 && (!addr || LOOPBACK.has(addr)) : TRUST_PROXY,
+);
 app.use(compression());
 
 const api = express.Router();
@@ -369,7 +379,7 @@ for (const method of ['get', 'post', 'put', 'delete'] as const) {
 
 // Brute-force protection: too many wrong admin passwords / edit tokens from one IP => temporary block.
 api.use((req, res, next) => {
-  if ((req.get('x-admin-password') || req.get('x-edit-token')) && count(`authfail:${req.ip}`, AUTH_FAIL_WINDOW) >= AUTH_FAIL_MAX) {
+  if ((req.get('x-admin-password') || req.get('x-edit-token')) && count(`authfail:${clientIp(req)}`, AUTH_FAIL_WINDOW) >= AUTH_FAIL_MAX) {
     return res.status(429).json({ error: 'تلاش‌های ناموفق زیاد بود؛ ۱۵ دقیقه دیگر دوباره امتحان کنید.' });
   }
   next();
@@ -966,6 +976,37 @@ const canManageSettings = (req: Request) => (ADMIN_PASSWORD ? isAdmin(req) : !is
 api.get('/settings', (req, res) => {
   if (!canManageSettings(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
   res.set('Cache-Control', 'no-store').json({ sms: maskSmsSettings(smsSettings), sentToday: smsCountToday() });
+});
+
+/** Install health for the settings page: lets a non-technical admin confirm the setup. */
+api.get('/health', async (req, res) => {
+  if (!canManageSettings(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
+  const ip = clientIp(req).replace(/^::ffff:/, '');
+  let dataWritable = false;
+  try {
+    const probe = path.join(DATA_DIR, `.write-test-${crypto.randomUUID()}`);
+    await fs.writeFile(probe, 'ok');
+    await fs.rm(probe);
+    dataWritable = true;
+  } catch {
+    /* reported below */
+  }
+  const inside = (dir: string, parent: string) => dir === parent || dir.startsWith(parent + path.sep);
+  res.set('Cache-Control', 'no-store').json({
+    ip,
+    ipOk: !!ip && ip !== 'unknown' && !LOOPBACK.has(ip),
+    node: process.versions.node,
+    nodeOk: Number(process.versions.node.split('.')[0]) >= 18,
+    dataDir: DATA_DIR,
+    dataWritable,
+    dataOutsideApp: !inside(DATA_DIR, APP_ROOT),
+    dataNotPublic: !/[\\/](public_html|www|htdocs)([\\/]|$)/.test(DATA_DIR),
+    publicUrl: PUBLIC_URL,
+    basePath: BASE_PATH,
+    passwordStrong: ADMIN_PASSWORD.length >= 10,
+    ffmpeg: ffmpegAvailable,
+    sms: smsSettings.provider !== 'none',
+  });
 });
 
 api.put('/settings', express.json({ limit: '64kb' }), async (req, res) => {

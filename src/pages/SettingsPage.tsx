@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import { CircleCheck, Home, Loader2, Lock, MessageSquareText, Save, Send, TriangleAlert } from 'lucide-react';
-import { api, getAdminPassword, setAdminPassword } from '../lib/api';
+import { api, getAdminPassword, setAdminPassword, type Health } from '../lib/api';
 import { route } from '../lib/paths';
 import { hideSplash } from '../lib/splash';
 import { ColorModeToggle, useAdminTheme } from '../lib/adminTheme';
@@ -90,6 +90,7 @@ export default function SettingsPage() {
         </div>
       </header>
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+        <InstallHealth />
         <Section
           title="پنل پیامک"
           description="برای ارسال اعلان «اعلام حضور» به کارشناس‌ها و مدیران. اطلاعات فقط روی سرور ذخیره می‌شود و کلیدها هرگز کامل نمایش داده نمی‌شوند؛ برای تغییر، مقدار جدید را وارد کنید."
@@ -238,5 +239,44 @@ function Login({ onDone }: { onDone: () => void }) {
         <button className="w-full rounded-xl btn-ad hover:brightness-110 text-white font-black py-3">ورود</button>
       </form>
     </div>
+  );
+}
+
+/** Green/amber checklist of the installation, so the setup can be confirmed without technical knowledge. */
+function InstallHealth() {
+  const [h, setH] = useState<Health | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    api.health().then(setH).catch(() => setFailed(true));
+  }, []);
+  if (failed) return null;
+  if (!h) return null;
+  const here = `${window.location.origin}${h.basePath}`;
+  const rows: { ok: boolean; optional?: boolean; title: string; detail: string }[] = [
+    { ok: window.location.protocol === 'https:', title: 'اتصال امن (https)', detail: window.location.protocol === 'https:' ? 'برقرار است.' : 'سایت با http باز شده است. در cPanel گواهی SSL را فعال کنید (SSL/TLS Status → Run AutoSSL). بدون https دوربین ثبت حضور و حالت آفلاین کار نمی‌کنند.' },
+    { ok: h.nodeOk, title: 'نسخه Node.js', detail: h.nodeOk ? `نسخه ${h.node}` : `نسخه ${h.node} قدیمی است؛ در Setup Node.js App نسخه ۱۸ یا بالاتر را انتخاب کنید.` },
+    { ok: h.dataWritable, title: 'پوشه اطلاعات قابل نوشتن است', detail: h.dataWritable ? h.dataDir : `برنامه نمی‌تواند در ${h.dataDir} بنویسد. مسیر DATA_DIR را بررسی کنید.` },
+    { ok: h.dataOutsideApp && h.dataNotPublic, title: 'پوشه اطلاعات جای امنی است', detail: !h.dataOutsideApp ? 'پوشه اطلاعات داخل پوشه برنامه است و با به‌روزرسانی پاک می‌شود. DATA_DIR را بیرون از پوشه برنامه بگذارید.' : !h.dataNotPublic ? 'پوشه اطلاعات داخل public_html است و ممکن است از اینترنت قابل دیدن باشد. آن را بیرون از public_html بگذارید.' : 'بیرون از پوشه برنامه و public_html.' },
+    { ok: h.ipOk, title: 'تشخیص IP بازدیدکننده', detail: h.ipOk ? `IP شما از دید سرور: ${h.ip}` : `سرور IP واقعی بازدیدکننده‌ها را نمی‌بیند (${h.ip}). محدودیت‌های امنیتی بین همه مشترک می‌شود؛ به پشتیبانی هاست بگویید هدر X-Forwarded-For را به برنامه Node.js بفرستد.` },
+    { ok: !!h.publicUrl && h.publicUrl === here, title: 'آدرس عمومی (PUBLIC_URL)', detail: !h.publicUrl ? `تنظیم نشده است؛ مقدار ${here} را وارد کنید.` : h.publicUrl === here ? h.publicUrl : `${h.publicUrl} با آدرس فعلی (${here}) یکی نیست؛ پیش‌نمایش لینک‌ها در تلگرام/واتس‌اپ اشتباه می‌شود.` },
+    { ok: h.passwordStrong, title: 'رمز مدیر قوی است', detail: h.passwordStrong ? 'حداقل ۱۰ حرف.' : 'رمز مدیر کوتاه است؛ دست‌کم ۱۰ حرف شامل عدد و حروف انتخاب کنید.' },
+    { ok: h.ffmpeg, optional: true, title: 'پردازش ویدئو (ffmpeg) — اختیاری', detail: h.ffmpeg ? 'فعال است.' : 'روی این هاست نصب نیست؛ فقط ویدئوی MP4 و WebM پذیرفته می‌شود. مشکلی نیست.' },
+    { ok: h.sms, optional: true, title: 'پنل پیامک — اختیاری', detail: h.sms ? 'تنظیم شده است.' : 'تنظیم نشده؛ اگر اعلان پیامکی می‌خواهید، پایین همین صفحه وارد کنید.' },
+  ];
+  const problems = rows.filter(r => !r.ok && !r.optional).length;
+  return (
+    <Section title="وضعیت نصب" description={problems ? `${problems.toLocaleString('fa-IR')} مورد نیاز به بررسی دارد.` : 'همه موارد ضروری درست است.'}>
+      <ul className="space-y-2">
+        {rows.map(r => (
+          <li key={r.title} className="flex items-start gap-2.5 text-sm">
+            {r.ok ? <CircleCheck className="w-5 h-5 shrink-0 text-emerald-600" /> : <TriangleAlert className={`w-5 h-5 shrink-0 ${r.optional ? 'text-slate-400' : 'text-amber-600'}`} />}
+            <span>
+              <span className="font-bold">{r.title}</span>
+              <span className="block text-xs text-slate-500 leading-relaxed break-all">{r.detail}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }
