@@ -170,6 +170,16 @@ async function readRecord(id: string): Promise<InvitationRecord | null> {
   }
 }
 
+/**
+ * Write-then-rename, so a crash or restart mid-write (e.g. Passenger recycling the app)
+ * never leaves a half-written file behind: readers see either the old or the new version.
+ */
+async function writeJsonAtomic(file: string, data: unknown, pretty = true) {
+  const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(tmp, pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data));
+  await fs.rename(tmp, file);
+}
+
 async function writeRecord(rec: InvitationRecord) {
   const target = fileFor(rec.id);
   const tmp = `${target}.${crypto.randomUUID()}.tmp`;
@@ -334,6 +344,29 @@ app.use(compression());
 
 const api = express.Router();
 
+// Express 4 ignores rejected promises from async handlers: an error (disk full, damaged
+// file, …) would become an unhandled rejection and take the whole process down. Every API
+// route handler's promise is caught and passed on to the JSON error handler (api.use at the end).
+for (const method of ['get', 'post', 'put', 'delete'] as const) {
+  const original = api[method].bind(api) as (...args: unknown[]) => unknown;
+  (api as any)[method] = (path: unknown, ...handlers: unknown[]) =>
+    original(
+      path,
+      ...handlers.map(h =>
+        typeof h === 'function' && h.length < 4
+          ? (req: Request, res: Response, next: NextFunction) => {
+              try {
+                const r = (h as (...a: unknown[]) => unknown)(req, res, next);
+                if (r && typeof (r as Promise<unknown>).catch === 'function') (r as Promise<unknown>).catch(next);
+              } catch (e) {
+                next(e);
+              }
+            }
+          : h,
+      ),
+    );
+}
+
 // Brute-force protection: too many wrong admin passwords / edit tokens from one IP => temporary block.
 api.use((req, res, next) => {
   if ((req.get('x-admin-password') || req.get('x-edit-token')) && count(`authfail:${req.ip}`, AUTH_FAIL_WINDOW) >= AUTH_FAIL_MAX) {
@@ -437,10 +470,18 @@ function linkKey(t: Tracking, raw: unknown): string {
 
 const rsvpFile = (id: string) => path.join(RSVP_DIR, `${id}.json`);
 async function readRsvps(id: string): Promise<Rsvp[]> {
+  let text: string;
   try {
-    return JSON.parse(await fs.readFile(rsvpFile(id), 'utf8'));
+    text = await fs.readFile(rsvpFile(id), 'utf8');
   } catch {
-    return [];
+    return []; // no responses yet
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // Never treat a damaged guest list as empty: the next write would erase every response.
+    console.error(`RSVP file of ${id} is not valid JSON; refusing to overwrite it`, e);
+    throw new Error('rsvp file damaged');
   }
 }
 let rsvpLock: Promise<unknown> = Promise.resolve();
@@ -448,7 +489,7 @@ function addRsvp(id: string, entry: Rsvp) {
   const run = rsvpLock.then(async () => {
     const list = await readRsvps(id);
     list.push(entry);
-    await fs.writeFile(rsvpFile(id), JSON.stringify(list, null, 2));
+    await writeJsonAtomic(rsvpFile(id), list);
   });
   rsvpLock = run.catch(() => {});
   return run;
@@ -459,7 +500,7 @@ function updateRsvps<T>(id: string, fn: (list: Rsvp[]) => T | Promise<T>): Promi
   const run = rsvpLock.then(async () => {
     const list = await readRsvps(id);
     const out = await fn(list);
-    await fs.writeFile(rsvpFile(id), JSON.stringify(list, null, 2));
+    await writeJsonAtomic(rsvpFile(id), list);
     return out;
   });
   rsvpLock = run.catch(() => {});
@@ -555,7 +596,7 @@ async function flushStats() {
   for (const id of [...dirtyStats]) {
     dirtyStats.delete(id);
     const s = statsCache.get(id);
-    if (s && (await fs.stat(fileFor(id)).catch(() => null))) await fs.writeFile(statsFile(id), JSON.stringify(s));
+    if (s && (await fs.stat(fileFor(id)).catch(() => null))) await writeJsonAtomic(statsFile(id), s, false);
   }
 }
 setInterval(() => flushStats().catch(console.error), 15_000).unref();
@@ -751,20 +792,28 @@ api.post('/records/:id/publish', json, async (req, res) => {
 
 /** Take an invitation offline again (it becomes a draft; the address stays reserved). */
 api.post('/records/:id/unpublish', async (req, res) => {
-  const rec = await readRecord(req.params.id);
-  if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
-  if (!canEdit(req, rec)) return res.status(401).json({ error: 'اجازه این کار را ندارید' });
-  const next = { ...rec, draft: { ...rec.draft, slug: rec.published?.slug || rec.draft.slug }, published: null, publishedAt: null, revision: rec.revision + 1, updatedAt: new Date().toISOString() };
-  await writeRecord(next);
-  res.json(await recordView(next));
+  // Under the record lock, like every other read-modify-write (an autosave can't interleave).
+  const out = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return { status: 404, body: { error: 'دعوتنامه پیدا نشد' } };
+    if (!canEdit(req, rec)) return { status: 401, body: { error: 'اجازه این کار را ندارید' } };
+    const next = { ...rec, draft: { ...rec.draft, slug: rec.published?.slug || rec.draft.slug }, published: null, publishedAt: null, revision: rec.revision + 1, updatedAt: new Date().toISOString() };
+    await writeRecord(next);
+    return { status: 200, body: await recordView(next) };
+  });
+  res.status(out.status).json(out.body);
 });
 
 api.post('/records/:id/token', async (req, res) => {
   if (!isAdmin(req)) return res.status(403).json({ error: 'دسترسی مدیر لازم است' });
-  const rec = await readRecord(req.params.id);
-  if (!rec) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   const editToken = newToken();
-  await writeRecord({ ...rec, editTokenHash: sha256(editToken) });
+  const found = await withSlugLock(async () => {
+    const rec = await readRecord(req.params.id);
+    if (!rec) return false;
+    await writeRecord({ ...rec, editTokenHash: sha256(editToken) });
+    return true;
+  });
+  if (!found) return res.status(404).json({ error: 'دعوتنامه پیدا نشد' });
   res.json({ editToken });
 });
 
@@ -881,7 +930,7 @@ api.delete('/records/:id/rsvps/:rid', async (req, res) => {
   if (!rec) return;
   const run = rsvpLock.then(async () => {
     const list = (await readRsvps(rec.id)).filter(r => r.id !== req.params.rid);
-    await fs.writeFile(rsvpFile(rec.id), JSON.stringify(list, null, 2));
+    await writeJsonAtomic(rsvpFile(rec.id), list);
   });
   rsvpLock = run.catch(() => {});
   await run;
@@ -951,7 +1000,7 @@ function upsertNotifyLog(id: string, entry: NotifyLogEntry) {
     if (!(await fs.stat(fileFor(id)).catch(() => null))) return; // invitation deleted meanwhile
     const list = (await readNotifyLog(id)).filter(e => e.id !== entry.id);
     list.unshift(entry);
-    await fs.writeFile(notifyFile(id), JSON.stringify(list.slice(0, 200), null, 2));
+    await writeJsonAtomic(notifyFile(id), list.slice(0, 200));
   });
   notifyLock = run.catch(() => {});
   return run;
@@ -1278,7 +1327,7 @@ async function processOps(rec: InvitationRecord, ops: CheckinOp[]): Promise<OpRe
       g.visits = (g.visits ?? 0) + 1;
       out.push({ opId, status: first ? 'ok' : 'already', guest: toGuest(g) });
     }
-    await fs.writeFile(opsFile(rec.id), JSON.stringify(done.slice(-5000)));
+    await writeJsonAtomic(opsFile(rec.id), done.slice(-5000), false);
     return out;
   });
   sideEffects.forEach(f => f());
@@ -1470,10 +1519,11 @@ api.post('/uploads', limit('upload', 60, 3_600_000), async (req, res) => {
 });
 
 api.use((_req, res) => res.status(404).json({ error: 'یافت نشد' }));
-api.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+api.use((err: any, req: Request, res: Response, next: NextFunction) => {
   if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'حجم درخواست بیش از حد مجاز است' });
-  console.error(err);
-  res.status(500).json({ error: 'خطای سرور' });
+  console.error(`[api] ${req.method} ${req.originalUrl}:`, err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'خطای سرور؛ چند لحظه بعد دوباره تلاش کنید.' });
 });
 
 // ---------------------------------------------------------------- HTML (link previews, themed splash, 404s)
@@ -1591,6 +1641,9 @@ async function start() {
     if (!ADMIN_PASSWORD) console.warn('[warn] ADMIN_PASSWORD is not set – anyone can create invitations and upload files.');
   });
 }
+
+// Background work (SMS retries, stats flush, cleanup) must never crash the server either.
+process.on('unhandledRejection', err => console.error('[unhandled]', err));
 
 start().catch(err => {
   console.error(err);

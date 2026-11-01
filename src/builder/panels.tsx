@@ -17,7 +17,13 @@ function downloadFile(filename: string, text: string, type = 'text/csv;charset=u
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const csvCell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+// Guests type these values on a public form: a cell starting with = + - @ would run as a
+// formula when the file is opened in Excel (CSV injection), so such text is marked as text.
+const csvCell = (v: string | number) => {
+  let s = String(v);
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
 export const toCsv = (rows: (string | number)[][]) => rows.map(r => r.map(csvCell).join(',')).join('\r\n');
 
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {

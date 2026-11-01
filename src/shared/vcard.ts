@@ -1,6 +1,6 @@
 import { contactLinks, normalizePhone, type InvitationConfig, type Lang, localize } from './invitation';
 
-const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 
 /** vCard 3.0 for the organiser, so guests can save the company in their phone's contacts. */
 export function vcardContent(c: InvitationConfig, lang: Lang = 'fa'): string {
